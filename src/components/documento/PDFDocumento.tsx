@@ -220,6 +220,16 @@ const styles = StyleSheet.create({
   tableColVersion: {
     width: 80,
   },
+  sectionContentWrapper: {
+    marginLeft: 15, // Esta es la sangría general para el contenido
+    marginTop: 4,
+  },
+  // Ajustamos el estilo de las descripciones para que no hereden márgenes extra innecesarios
+  textContent: {
+    fontSize: 10,
+    lineHeight: 1.5,
+    textAlign: 'justify',
+  },
 });
 
 interface PDFDocumentoProps {
@@ -332,29 +342,37 @@ export const PDFDocumento = ({
         {/* I. OBJETIVO */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>I. OBJETIVO</Text>
-          <Text style={styles.sectionContent}>{documento.objetivo}</Text>
+          <View style={styles.sectionContentWrapper}>
+              <Text style={styles.textContent}>{documento.objetivo}</Text>
+            </View>
+          {/*<Text style={styles.sectionContent}>{documento.objetivo}</Text>*/}
         </View>
 
         {/* II. ALCANCE */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>II. ALCANCE</Text>
-          <Text style={styles.sectionContent}>{documento.alcance}</Text>
+          <View style={styles.sectionContentWrapper}>
+              <Text style={styles.textContent}>{documento.alcance}</Text>
+          </View>
         </View>
 
         {/* III. PUESTOS RESPONSABLES */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>III. PUESTOS RESPONSABLES</Text>
+          <View style={styles.sectionContentWrapper}>
           {puestosResponsables.map((puesto, index) => (
             <View key={index} style={styles.puestoItem}>
               <Text style={styles.puestoNombre}>{puesto.nombre}</Text>
               <Text style={styles.puestoDescripcion}>{puesto.descripcion}</Text>
             </View>
           ))}
+          </View>
         </View>
 
         {/* IV. DEFINICIONES */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>IV. DEFINICIONES</Text>
+          <View style={styles.sectionContentWrapper}>
           {documento.definiciones.length > 0 ? (
             documento.definiciones.map((def, index) => (
               <View key={def.id} style={styles.definicionItem}>
@@ -364,12 +382,14 @@ export const PDFDocumento = ({
             ))
           ) : (
             <Text style={styles.sectionContent}>No se han definido términos.</Text>
-          )}
+            )}
+            </View>
         </View>
 
         {/* V. ACTIVIDADES */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>V. ACTIVIDADES</Text>
+          <View style={styles.sectionContentWrapper}>
           {actividadesJerarquicas.map((actividad, index) => {
             const nivelStyle =
               actividad.nivel === 1
@@ -394,6 +414,7 @@ export const PDFDocumento = ({
               </View>
             );
           })}
+            </View>
         </View>
 
         {/* VI. ANEXOS */}

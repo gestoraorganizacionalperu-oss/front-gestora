@@ -186,12 +186,12 @@ export const DocumentoSubProcesoView = ({ subProceso, onBack }: DocumentoSubProc
       } else {
         // Crear primera versión con la estructura requerida por la API
         const createRequest = {
-          tipoDocumentoId: '6573c05c088f170e060c4001', // Valor por defecto
+          tipoDocumentoId: '6573c05c088f170e060c4001', // Valor por defecto se cambio a procedimiento
           subProcesoId: subProceso._id,
           areaId: formData.areaId,
           areaCodigo: formData.areaCodigo,
           desdeMatrizProceso: true,
-          descripcionDocumento: formData.descripcionDocumento,
+          descripcionDocumento: "N/A", //formData.descripcionDocumento,
           objetivo: formData.objetivo,
           alcance: formData.alcance,
           definiciones: formData.definiciones,

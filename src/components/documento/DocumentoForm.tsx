@@ -42,7 +42,7 @@ interface DocumentoFormProps {
 export interface DocumentoFormData {
   areaId: string;
   areaCodigo: string;
-  descripcionDocumento: string;
+ // descripcionDocumento: string; 
   objetivo: string;
   alcance: string;
   definiciones: Omit<Definicion, 'id'>[];
@@ -128,7 +128,7 @@ export const DocumentoForm = ({
 
   // Form state
   const [areaId, setAreaId] = useState('');
-  const [descripcionDocumento, setDescripcionDocumento] = useState('');
+  //const [descripcionDocumento, setDescripcionDocumento] = useState('');
   const [objetivo, setObjetivo] = useState('');
   const [alcance, setAlcance] = useState('');
   const [definiciones, setDefiniciones] = useState<Omit<Definicion, 'id'>[]>([]);
@@ -254,14 +254,14 @@ export const DocumentoForm = ({
       return;
     }
 
-    if (isFirstVersion && !descripcionDocumento.trim()) {
+    /*if (isFirstVersion && !descripcionDocumento.trim()) {
       toast({
         title: 'Campo requerido',
         description: 'La descripción del documento es obligatoria',
         variant: 'destructive',
       });
       return;
-    }
+    }*///No debe guardarse este input
 
     if (!objetivo.trim()) {
       toast({
@@ -306,7 +306,7 @@ export const DocumentoForm = ({
     const formData: DocumentoFormData = {
       areaId,
       areaCodigo,
-      descripcionDocumento: descripcionDocumento.trim(),
+     // descripcionDocumento: descripcionDocumento.trim(),
       objetivo: objetivo.trim(),
       alcance: alcance.trim(),
       definiciones,
@@ -320,6 +320,7 @@ export const DocumentoForm = ({
     }
 
     await onSubmit(formData);
+    setModificacion('');
   };
 
   if (loadingUsers || loadingAreas) {
@@ -354,7 +355,7 @@ export const DocumentoForm = ({
         </div>
 
         {/* Descripción del Documento - Solo para primera versión */}
-        {isFirstVersion && (
+        {/*{isFirstVersion && (
           <div className="space-y-2">
             <Label htmlFor="descripcionDocumento">
               Descripción del Documento <span className="text-destructive">*</span>
@@ -368,7 +369,7 @@ export const DocumentoForm = ({
               required
             />
           </div>
-        )}
+        )}*/}
 
         {/* Objetivo */}
         <div className="space-y-2">

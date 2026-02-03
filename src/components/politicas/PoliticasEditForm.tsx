@@ -134,7 +134,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
     tipoDocumentoId: '',
     subProcesoId: '',
     areaId: '',
-    descripcionDocumento: '',
+    //descripcionDocumento: '',
     objetivo: '',
     alcance: '',
     elaboradoPorId: '',
@@ -197,7 +197,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
             tipoDocumentoId: doc.tipoDocumentoId || '',
             subProcesoId: doc.subProcesoId || '',
             areaId: doc.areaId || '',
-            descripcionDocumento: doc.descripcionDocumento || '',
+            //descripcionDocumento: doc.descripcionDocumento || '',
             objetivo: doc.objetivo || '',
             alcance: doc.alcance || '',
             elaboradoPorId: doc.elaboradoPor?.usuarioId || '',
@@ -453,7 +453,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
         areaId: formData.areaId, // Siempre enviar el valor (puede estar vacío para Manual)
         areaCodigo: areaCodigo,
         desdeMatrizProceso: desdeMatrizProcesoValue,
-        descripcionDocumento: formData.descripcionDocumento,
+        descripcionDocumento: "N/A", //formData.descripcionDocumento,
         objetivo: isManual ? formData.objetivo : '',
         alcance: isManual ? formData.alcance : '',
         definiciones: documento?.definiciones || [],
@@ -593,7 +593,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
                 </Select>
                 {disableSubprocesoArea && !desdeMatrizProceso && (
                   <p className="text-xs text-muted-foreground">
-                    Este campo no es requerido para documentos tipo Manual
+                    Este campo no es requerido para documentos tipo Procedimiento
                   </p>
                 )}
               </div>
@@ -644,7 +644,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
               </Select>
               {disableSubprocesoArea && !desdeMatrizProceso && (
                 <p className="text-xs text-muted-foreground">
-                  Este campo no es requerido para documentos tipo Manual
+                  Este campo no es requerido para documentos tipo Procedimiento
                 </p>
               )}
             </div>
@@ -677,7 +677,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
             )}
 
             {/* Descripción */}
-            <div className="space-y-2">
+            {/*<div className="space-y-2">
               <Label htmlFor="descripcionDocumento">DESCRIPCION</Label>
               <Textarea
                 id="descripcionDocumento"
@@ -687,7 +687,7 @@ const PoliticasEditForm = ({ documentoId, onBack }: PoliticasEditFormProps) => {
                 placeholder="Descripción del documento..."
                 disabled={isFormReadOnly}
               />
-            </div>
+            </div>*/}
 
             {/* Elaborado, Revisado, Aprobado */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

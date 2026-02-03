@@ -82,10 +82,17 @@ export class MOFPDFGenerator {
     // Add logo in top left
     if (logoBase64) {
       try {
+      const logoWidth = 50; // El ancho que ya tenía definido
+      const xCentered = (this.pageWidth - logoWidth) / 2; // Cálculo para centrar
+      this.doc.addImage(logoBase64, 'PNG', xCentered, 20, logoWidth, 20);
+    } catch (error) {
+      console.error('Error adding logo to cover:', error);
+    }
+      /*try {
         this.doc.addImage(logoBase64, 'PNG', this.margin, 20, 50, 20);
       } catch (error) {
         console.error('Error adding logo to cover:', error);
-      }
+      }*/
     }
 
     // Add main title in center
