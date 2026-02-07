@@ -17,28 +17,73 @@ export function extractPuestoIds(subProceso: SubProceso): string[] {
     });
   });
 
+  // SOLO extraer de actividades del subproceso padre (nivel directo)
+  subProceso.subprocesos.forEach(subprocesohijo => {
+    subprocesohijo.actividades.forEach(actividad => {
+      actividad.descripciones.forEach(descripcion => {
+        descripcion.puestos.forEach(puesto => {
+        if (puesto.id) {
+          puestoIds.add(puesto.id);
+        }
+      });
+    });
+  })});
+
   return Array.from(puestoIds);
 }
 
 // Obtener puestos con descripciones desde la lista completa
 export function getPuestosConDescripcion(
   puestoIds: string[],
-  todosPuestos: Puesto[]
+  todosPuestos: Puesto[],
+  subProceso: SubProceso
 ): Array<{ nombre: string; descripcion: string }> {
   const puestosMap = new Map(todosPuestos.map(p => [p._id, p]));
-  const puestosUnicos = new Map<string, { nombre: string; descripcion: string }>();
+  const puestosUnicos = new Map<string, { nombre: string; descripcion: string ;  actividades: any[];}>();
 
   puestoIds.forEach(id => {
     const puesto = puestosMap.get(id);
     if (puesto && !puestosUnicos.has(puesto.Nombre)) {
+      
+      let actividadesArray :any=[];
+      // extraer actividades del subproceso padre (nivel directo)
+      subProceso.actividades.forEach(actividad => {
+        actividad.descripciones.forEach(descripcion => {
+          descripcion.puestos.forEach(puesto => {
+            if (puesto.id==id) {
+              if(!actividadAgregadaPuesto(actividadesArray,actividad._id!))
+              actividadesArray.push(actividad);
+            }
+          });
+        });
+      });
+
+      // extraer  actividades del subproceso hijo 
+      subProceso.subprocesos.forEach(subprocesohijo => {
+        subprocesohijo.actividades.forEach(actividad => {
+          actividad.descripciones.forEach(descripcion => {
+            descripcion.puestos.forEach(puesto => {
+            if (puesto.id==id) {
+              if(!actividadAgregadaPuesto(actividadesArray,actividad._id!))
+              actividadesArray.push(actividad);
+            }
+          });
+        });
+      })});
+
+
       puestosUnicos.set(puesto.Nombre, {
         nombre: puesto.Nombre,
         descripcion: puesto.Descripcion,
+        actividades: actividadesArray ?? [],
       });
     }
   });
 
   return Array.from(puestosUnicos.values());
+}
+function actividadAgregadaPuesto(actividadesArray:any,idNuevo:string): Boolean{
+  return actividadesArray.filter((item:any) =>  item._id === idNuevo).length>0;
 }
 
 // Estructura para actividades jerárquicas
@@ -48,6 +93,10 @@ export interface ActividadJerarquica {
   tipo: 'actividad' | 'descripcion' | 'subproceso';
   nombre: string;
   detalle?: string;
+  descripciones?: Array<{
+  texto: string;
+  puestos: Array<{ id: string | { $oid: string } }>;
+}>;
 }
 
 // Generar estructura jerárquica de actividades para el documento

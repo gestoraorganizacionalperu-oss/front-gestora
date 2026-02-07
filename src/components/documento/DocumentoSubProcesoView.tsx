@@ -93,9 +93,16 @@ export const DocumentoSubProcesoView = ({ subProceso, onBack }: DocumentoSubProc
       console.log('IDs de puestos extraídos:', puestoIds);
 
       // Obtener puestos con descripciones
-      const puestosResponsables = getPuestosConDescripcion(puestoIds, todosPuestos);
+      const puestosResponsables = getPuestosConDescripcion(puestoIds, todosPuestos, sp);
       console.log('Puestos responsables:', puestosResponsables);
 
+      // 3. Unimos la info con su ID
+    const puestosConIdParaPDF = puestosResponsables.map((puesto, index) => ({
+      ...puesto,
+      id: puestoIds[index] // Le asignamos el ID que le corresponde por posición
+    }));
+      console.log('Puestos con ID corregidos:', puestosConIdParaPDF);
+      
       // Generar actividades jerárquicas
       const actividadesJerarquicas = generarActividadesJerarquicas(sp);
       console.log('Actividades jerárquicas:', actividadesJerarquicas.length);
@@ -109,7 +116,7 @@ export const DocumentoSubProcesoView = ({ subProceso, onBack }: DocumentoSubProc
       const blob = await pdf(
         <PDFDocumento
           documento={doc}
-          puestosResponsables={puestosResponsables}
+          puestosResponsables={puestosConIdParaPDF}//{puestosResponsables}
           actividadesJerarquicas={actividadesJerarquicas}
           logoUrl={logoUrl}
         />

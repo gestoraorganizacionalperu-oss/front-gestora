@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
 
 interface PDFDocumentoProps {
   documento: SubProcesoDocumento;
-  puestosResponsables: Array<{ nombre: string; descripcion: string }>;
+  puestosResponsables: Array<{ id: string; nombre: string; descripcion: string; actividades?: any[]}>;
   actividadesJerarquicas: ActividadJerarquica[];
   logoUrl?: string;
 }
@@ -356,18 +356,46 @@ export const PDFDocumento = ({
           </View>
         </View>
 
-        {/* III. PUESTOS RESPONSABLES */}
-        <View style={styles.section}>
+        {/*III. PUESTOS RESPONSABLES*/}
+       {/* {<View style={styles.section}>
           <Text style={styles.sectionTitle}>III. PUESTOS RESPONSABLES</Text>
           <View style={styles.sectionContentWrapper}>
           {puestosResponsables.map((puesto, index) => (
             <View key={index} style={styles.puestoItem}>
               <Text style={styles.puestoNombre}>{puesto.nombre}</Text>
-              <Text style={styles.puestoDescripcion}>{puesto.descripcion}</Text>
+              {<Text style={styles.puestoDescripcion}>{puesto.descripcion}</Text>}
             </View>
           ))}
           </View>
+        </View>} */}
+
+        {/* III. PUESTOS RESPONSABLES */}
+<View style={styles.section}>
+  <Text style={styles.sectionTitle}>III. PUESTOS RESPONSABLES</Text>
+  <View style={styles.sectionContentWrapper}>
+    {puestosResponsables.map((puesto, index) => (
+      <View key={index} style={styles.puestoItem}>
+        {/* Nombre del Puesto en Negrita */}
+        <Text style={styles.puestoNombre}>{puesto.nombre}</Text>
+        
+        {/* Listado de Actividades Asociadas con sangría */}
+        <View style={{ marginLeft: 15, marginTop: 2 }}>
+          {puesto.actividades && puesto.actividades.length > 0 ? (
+            puesto.actividades.map((act, actIdx) => (
+              <Text key={actIdx} style={{ fontSize: 9, marginBottom: 2 }}>
+                • {act.nombre}
+              </Text>
+            ))
+          ) : (
+            <Text style={{ fontSize: 8, color: 'gray' }}>Sin actividades asociadas.</Text>
+          )}
         </View>
+      </View>
+    ))}
+  </View>
+</View>
+
+       
 
         {/* IV. DEFINICIONES */}
         <View style={styles.section}>
