@@ -9,6 +9,9 @@ import Organigrama from './pages/Organigrama';
 import MatrizProcesos from './pages/MatrizProcesos';
 import MOF from './pages/MOF';
 import Politicas from './pages/Politicas';
+import GestionProduccion from './pages/GestionProduccion';
+import AdminControlProduccion from './pages/AdminControlProduccion';
+import ReportesProduccion from './pages/ReportesProduccion';
 
 interface RouteConfig {
   name: string;
@@ -92,6 +95,21 @@ const routes: RouteConfig[] = [
     name: 'Politicas y Procedimientos',
     path: '/politicas-procedimientos',
     element: <Politicas />
+  },
+  {
+    name: 'Gestión de Producción',
+    path: '/gestion-produccion',
+    element: <GestionProduccion />
+  },
+  {
+    name: 'Administración Control de Producción',
+    path: '/administracion/control-produccion',
+    element: <AdminControlProduccion />
+  },
+  {
+    name: 'Reportes de Producción',
+    path: '/reportes-produccion',
+    element: <ReportesProduccion />
   }
 ];
 
