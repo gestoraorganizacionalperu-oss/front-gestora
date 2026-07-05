@@ -15,7 +15,10 @@ import {
   MapPin,
   ChevronDown,
   Menu,
-  X
+  X,
+  ClipboardList,
+  BarChart3,
+  Factory
 } from 'lucide-react';
 import type { MenuItem } from '@/types';
 
@@ -31,6 +34,16 @@ const iconMap: Record<string, React.ReactNode> = {
   filetext: <FileText className="w-5 h-5" />,
   bookopen: <BookOpen className="w-5 h-5" />,
   ubicaciones: <MapPin className="w-5 h-5" />,
+  // Íconos del módulo de Producción (nombre exacto enviado por el backend
+  // a confirmar; se agregan variantes probables como fallback)
+  factory: <Factory className="w-5 h-5" />,
+  produccion: <Factory className="w-5 h-5" />,
+  gestionproduccion: <Factory className="w-5 h-5" />,
+  clipboardlist: <ClipboardList className="w-5 h-5" />,
+  controlproduccion: <ClipboardList className="w-5 h-5" />,
+  barchart: <BarChart3 className="w-5 h-5" />,
+  barchart3: <BarChart3 className="w-5 h-5" />,
+  reportesproduccion: <BarChart3 className="w-5 h-5" />,
   // Iconos legacy (por compatibilidad)
   mantenimiento: <Settings className="w-5 h-5" />,
   empresa: <Building2 className="w-5 h-5" />,
@@ -79,7 +92,9 @@ const Sidebar: React.FC = () => {
     const hasChildren = menu.hijos && menu.hijos.length > 0;
     const isExpanded = expandedMenus.has(menu.id);
     const isActive = location.pathname === menu.ruta;
-    const icon = menu.icono ? iconMap[menu.icono.toLowerCase()] : null;
+    const icon = menu.icono
+      ? iconMap[menu.icono.toLowerCase()] || <Factory className="w-5 h-5" />
+      : null;
 
     // No mostrar submenús cuando está colapsado
     if (isCollapsed && level > 0) {
