@@ -38,6 +38,7 @@ const MatrizProcesos: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [matriz, setMatriz] = useState<MacroProceso[]>([]);
+  const [busqueda, setBusqueda] = useState('');
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const [puestosMap, setPuestosMap] = useState<Map<string, string>>(new Map());
 
@@ -215,6 +216,82 @@ const MatrizProcesos: React.FC = () => {
   };
 
   // Build matrix rows with rowspan
+  interface FilaPlana {
+    macro: string;
+    proceso: string;
+    subproceso1: string;
+    subproceso2: string;
+    actividad: string;
+    descripcion: string;
+    puesto: string;
+  }
+
+  // Construye una lista PLANA (sin celdas combinadas) de todas las filas
+  // hoja de la matriz -- se usa únicamente cuando hay un texto de búsqueda,
+  // sin tocar la lógica de rowSpan/paths de la vista normal (buildMatrixRows).
+  const buildFilasPlanas = (): FilaPlana[] => {
+    const filas: FilaPlana[] = [];
+
+    const agregarActividad = (
+      macroNombre: string,
+      procesoNombre: string,
+      sub1Nombre: string,
+      sub2Nombre: string,
+      actividad: Actividad
+    ) => {
+      if (actividad.descripciones.length === 0) {
+        filas.push({
+          macro: macroNombre,
+          proceso: procesoNombre,
+          subproceso1: sub1Nombre,
+          subproceso2: sub2Nombre,
+          actividad: actividad.nombre,
+          descripcion: '',
+          puesto: '',
+        });
+      } else {
+        actividad.descripciones.forEach((desc) => {
+          filas.push({
+            macro: macroNombre,
+            proceso: procesoNombre,
+            subproceso1: sub1Nombre,
+            subproceso2: sub2Nombre,
+            actividad: actividad.nombre,
+            descripcion: desc.texto,
+            puesto: desc.puestos?.map((p) => p.nombre).filter(Boolean).join(', ') || '',
+          });
+        });
+      }
+    };
+
+    matriz.forEach((macro) => {
+      macro.procesos.forEach((proceso) => {
+        proceso.subprocesos.forEach((sub1) => {
+          sub1.actividades.forEach((act) => agregarActividad(macro.nombre, proceso.nombre, sub1.nombre, '', act));
+          sub1.subprocesos.forEach((sub2) => {
+            sub2.actividades.forEach((act) =>
+              agregarActividad(macro.nombre, proceso.nombre, sub1.nombre, sub2.nombre, act)
+            );
+          });
+        });
+      });
+    });
+
+    return filas;
+  };
+
+  const filasFiltradas = React.useMemo(() => {
+    if (!busqueda.trim()) return [];
+    const termino = busqueda.trim().toLowerCase();
+    return buildFilasPlanas().filter((f) =>
+      [f.macro, f.proceso, f.subproceso1, f.subproceso2, f.actividad, f.descripcion, f.puesto]
+        .join(' ')
+        .toLowerCase()
+        .includes(termino)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busqueda, matriz]);
+
   const buildMatrixRows = (): MatrizRow[] => {
     const rows: MatrizRow[] = [];
 
@@ -1235,6 +1312,26 @@ const MatrizProcesos: React.FC = () => {
             )}
           </div>
 
+          {/* Buscador global */}
+          <div className="max-w-md">
+            <input
+              type="text"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar en toda la matriz (macroproceso, proceso, actividad, puesto...)"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            {busqueda.trim() && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {filasFiltradas.length} resultado{filasFiltradas.length !== 1 ? 's' : ''} encontrado{filasFiltradas.length !== 1 ? 's' : ''}
+                {' · '}
+                <button type="button" className="underline" onClick={() => setBusqueda('')}>
+                  limpiar
+                </button>
+              </p>
+            )}
+          </div>
+
           {/* Matrix Table with Loading Overlay */}
           <div className="relative">
             {isRefreshing && (
@@ -1245,6 +1342,44 @@ const MatrizProcesos: React.FC = () => {
                 </div>
               </div>
             )}
+            {busqueda.trim() ? (
+              <div className="border rounded-lg bg-card overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Macroproceso</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Proceso</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Subproceso Nivel 1</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Subproceso Nivel 2</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Actividad</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap border-r">Descripción</th>
+                      <th className="p-3 text-left font-semibold text-sm whitespace-nowrap">Puesto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filasFiltradas.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                          No se encontraron resultados para "{busqueda}".
+                        </td>
+                      </tr>
+                    ) : (
+                      filasFiltradas.map((f, i) => (
+                        <tr key={i} className="border-b">
+                          <td className="p-3 text-sm border-r">{f.macro}</td>
+                          <td className="p-3 text-sm border-r">{f.proceso}</td>
+                          <td className="p-3 text-sm border-r">{f.subproceso1}</td>
+                          <td className="p-3 text-sm border-r">{f.subproceso2}</td>
+                          <td className="p-3 text-sm border-r">{f.actividad}</td>
+                          <td className="p-3 text-sm border-r">{f.descripcion}</td>
+                          <td className="p-3 text-sm">{f.puesto}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
             <div 
               ref={scrollContainerRef}
               onTouchStart={handleTouchStart}
@@ -1301,6 +1436,7 @@ const MatrizProcesos: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         </>
       ) : selectedSubProceso ? (

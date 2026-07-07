@@ -12,6 +12,7 @@ export interface User {
   apellido: string;
   rol: string;
   profileId?: number;
+  dni?: string;
   empresa_id: string;
   empresa_nombre: string;
 }

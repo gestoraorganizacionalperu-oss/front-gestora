@@ -12,6 +12,7 @@ import Politicas from './pages/Politicas';
 import GestionProduccion from './pages/GestionProduccion';
 import AdminControlProduccion from './pages/AdminControlProduccion';
 import ReportesProduccion from './pages/ReportesProduccion';
+import MantenimientoAsistencias from './pages/MantenimientoAsistencias';
 
 interface RouteConfig {
   name: string;
@@ -70,6 +71,11 @@ const routes: RouteConfig[] = [
     name: 'Ubicaciones y Areas',
     path: '/mantenimiento/ubicaciones',
     element: <UbicacionesPage />
+  },
+  {
+    name: 'Mantenimiento de Asistencia',
+    path: '/mantenimiento/asistencias',
+    element: <MantenimientoAsistencias />
   },
   {
     name: 'Organigrama',

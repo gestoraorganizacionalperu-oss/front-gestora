@@ -52,10 +52,11 @@ const transformBackendResponse = (backendResponse: BackendAuthResponse): AuthRes
     apellido: backendResponse.user.LastName,
     rol: backendResponse.permisos.NamePerfil,
     profileId: backendResponse.user.ProfileId,
+    dni: backendResponse.user.Dni,
     empresa_id: backendResponse.user.CompanyId,
     empresa_nombre: 'ToolGestora S.A.', // El backend no retorna el nombre de la empresa
   };
-
+  
   // Transformar menús
   const transformMenu = (menu: BackendAuthResponse['permisos']['Menus'][0]): MenuItem => {
     return {
