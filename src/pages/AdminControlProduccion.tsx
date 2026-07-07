@@ -90,7 +90,26 @@ const AdminControlProduccion: React.FC = () => {
         produccionService.getMatrizProcesos(),
         produccionService.getTrabajadores(),
       ]);
-      setConfig(cfg);
+      // Limpieza del mismo campo legado en "Proyectos/Otros" (por si el
+      // documento se guardó antes de este cambio, con un responsableId
+      // único a nivel de fila en vez de por día).
+      const proyectoOtroConDiaResponsable = (dia?: { hProg: string; cantPro: string; responsableId?: string }) => ({
+        hProg: dia?.hProg || '',
+        cantPro: dia?.cantPro || '',
+        responsableId: dia?.responsableId ?? (cfg?.proyectoOtro as any)?.responsableId ?? '',
+      });
+      const proyectoOtroLimpio = cfg
+        ? {
+            descripcion: cfg.proyectoOtro?.descripcion || '',
+            lunes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.lunes),
+            martes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.martes),
+            miercoles: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.miercoles),
+            jueves: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.jueves),
+            viernes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.viernes),
+            sabado: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.sabado),
+          }
+        : undefined;
+      setConfig(cfg ? { ...cfg, proyectoOtro: proyectoOtroLimpio as any } : cfg);
       setTrabajadores(trabs);
 
       // La Matriz de Procesos es la lista MAESTRA de actividades -- nunca
@@ -118,7 +137,10 @@ const AdminControlProduccion: React.FC = () => {
           });
 
           return {
-            ...existente,
+            actividadId: existente.actividadId,
+            actividadNombre: existente.actividadNombre,
+            procesoNombre: existente.procesoNombre,
+            subprocesoNombre: existente.subprocesoNombre,
             lunes: conResponsablePorDia(existente.lunes),
             martes: conResponsablePorDia(existente.martes),
             miercoles: conResponsablePorDia(existente.miercoles),

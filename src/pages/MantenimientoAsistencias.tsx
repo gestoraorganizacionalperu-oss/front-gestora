@@ -12,14 +12,42 @@ import {
   type DiaSemanaHorario,
 } from '@/services/asistenciaService';
 
-const horarioVacio = (): HorarioTrabajador['horarios'] => ({
-  lunes: { entrada: '08:00', salida: '18:00' },
-  martes: { entrada: '08:00', salida: '18:00' },
-  miercoles: { entrada: '08:00', salida: '18:00' },
-  jueves: { entrada: '08:00', salida: '18:00' },
-  viernes: { entrada: '08:00', salida: '18:00' },
-  sabado: { entrada: '08:00', salida: '18:00' },
+const turnoDefecto = (entrada: string, salida: string) => ({ entrada, salida });
+
+const diaPorDefecto = () => ({
+  manana: turnoDefecto('08:00', '13:00'),
+  tarde: turnoDefecto('14:00', '17:30'),
 });
+
+const horarioVacio = (): HorarioTrabajador['horarios'] => ({
+  lunes: diaPorDefecto(),
+  martes: diaPorDefecto(),
+  miercoles: diaPorDefecto(),
+  jueves: diaPorDefecto(),
+  viernes: diaPorDefecto(),
+  sabado: diaPorDefecto(),
+});
+
+// Migración suave: documentos guardados antes de este cambio tenían un solo
+// turno por día ({entrada, salida}), no separado en mañana/tarde. Si viene
+// en ese formato legado, lo acomodamos como mejor esfuerzo (entrada legada
+// -> entrada de la mañana, salida legada -> salida de la tarde) en vez de
+// perder el dato guardado.
+const normalizarDia = (dia: any) => {
+  if (dia?.manana || dia?.tarde) {
+    return {
+      manana: { entrada: dia.manana?.entrada || '', salida: dia.manana?.salida || '' },
+      tarde: { entrada: dia.tarde?.entrada || '', salida: dia.tarde?.salida || '' },
+    };
+  }
+  if (dia?.entrada || dia?.salida) {
+    return {
+      manana: { entrada: dia.entrada || '', salida: '' },
+      tarde: { entrada: '', salida: dia.salida || '' },
+    };
+  }
+  return diaPorDefecto();
+};
 
 const MantenimientoAsistencias: React.FC = () => {
   const { showMessage } = useMessage();
@@ -31,7 +59,7 @@ const MantenimientoAsistencias: React.FC = () => {
   const [guardando, setGuardando] = useState(false);
 
   const [toleranciaMinutos, setToleranciaMinutos] = useState('10');
-  const [toleranciaMensualMax, setToleranciaMensualMax] = useState('90');
+  const [toleranciaMensualMax, setToleranciaMensualMax] = useState('120');
   const [horarios, setHorarios] = useState<HorarioTrabajador['horarios']>(horarioVacio());
 
   useEffect(() => {
@@ -50,7 +78,7 @@ const MantenimientoAsistencias: React.FC = () => {
       const data = await asistenciaService.getTrabajadores();
       setTrabajadores(data);
       if (data.length > 0) {
-        setTrabajadorSeleccionadoId(String(data[0]._id));
+        setTrabajadorSeleccionadoId(data[0].nro_doc);
       }
     } catch (error: any) {
       showMessage('error', error.message || 'Error al cargar los colaboradores');
@@ -65,12 +93,16 @@ const MantenimientoAsistencias: React.FC = () => {
       const horario = await asistenciaService.getHorarioPorTrabajador(trabajadorId);
       if (horario) {
         setToleranciaMinutos(String(horario.toleranciaMinutos ?? 10));
-        setToleranciaMensualMax(String(horario.toleranciaMensualMax ?? 90));
-        setHorarios({ ...horarioVacio(), ...horario.horarios });
+        setToleranciaMensualMax(String(horario.toleranciaMensualMax ?? 120));
+        const normalizado: HorarioTrabajador['horarios'] = {};
+        DIAS_HORARIO.forEach((d) => {
+          normalizado[d.key] = normalizarDia(horario.horarios?.[d.key]);
+        });
+        setHorarios(normalizado);
       } else {
         // Trabajador sin horario configurado todavía: valores por defecto
         setToleranciaMinutos('10');
-        setToleranciaMensualMax('90');
+        setToleranciaMensualMax('120');
         setHorarios(horarioVacio());
       }
     } catch (error: any) {
@@ -80,10 +112,18 @@ const MantenimientoAsistencias: React.FC = () => {
     }
   };
 
-  const actualizarHorarioDia = (dia: DiaSemanaHorario, campo: 'entrada' | 'salida', valor: string) => {
+  const actualizarHorarioDia = (
+    dia: DiaSemanaHorario,
+    turno: 'manana' | 'tarde',
+    campo: 'entrada' | 'salida',
+    valor: string
+  ) => {
     setHorarios((prev) => ({
       ...prev,
-      [dia]: { ...prev?.[dia], [campo]: valor },
+      [dia]: {
+        ...prev?.[dia],
+        [turno]: { ...prev?.[dia]?.[turno], [campo]: valor },
+      },
     }));
   };
 
@@ -106,7 +146,7 @@ const MantenimientoAsistencias: React.FC = () => {
   };
 
   const trabajadorSeleccionado = trabajadores.find(
-    (t) => String(t._id) === trabajadorSeleccionadoId
+    (t) => t.nro_doc === trabajadorSeleccionadoId
   );
 
   return (
@@ -132,7 +172,7 @@ const MantenimientoAsistencias: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {trabajadores.map((t) => (
-                <SelectItem key={t._id} value={String(t._id)}>
+                <SelectItem key={t._id} value={t.nro_doc}>
                   {t.nombres} — {t.nro_doc}
                 </SelectItem>
               ))}
@@ -176,34 +216,58 @@ const MantenimientoAsistencias: React.FC = () => {
                 </div>
               </div>
 
-              <div className="border rounded-lg overflow-hidden">
+              <div className="border rounded-lg overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-muted/50">
-                      <th className="text-left font-semibold px-4 py-2">Día</th>
-                      <th className="text-left font-semibold px-4 py-2">Hora Ingreso</th>
-                      <th className="text-left font-semibold px-4 py-2">Hora Salida</th>
+                      <th className="text-left font-semibold px-4 py-2" rowSpan={2}>Día</th>
+                      <th className="text-center font-semibold px-4 py-2 border-l" colSpan={2}>Turno Mañana</th>
+                      <th className="text-center font-semibold px-4 py-2 border-l" colSpan={2}>Turno Tarde</th>
+                    </tr>
+                    <tr className="bg-muted/50">
+                      <th className="text-left font-normal px-4 py-1 border-l text-xs text-muted-foreground">Entrada</th>
+                      <th className="text-left font-normal px-4 py-1 text-xs text-muted-foreground">Salida</th>
+                      <th className="text-left font-normal px-4 py-1 border-l text-xs text-muted-foreground">Entrada</th>
+                      <th className="text-left font-normal px-4 py-1 text-xs text-muted-foreground">Salida</th>
                     </tr>
                   </thead>
                   <tbody>
                     {DIAS_HORARIO.map((d) => (
                       <tr key={d.key} className="border-t">
                         <td className="px-4 py-2 font-medium">{d.label}</td>
-                        <td className="px-4 py-2">
+                        <td className="px-4 py-2 border-l">
                           <Input
                             type="time"
-                            className="w-36"
-                            value={horarios?.[d.key]?.entrada || ''}
-                            onChange={(e) => actualizarHorarioDia(d.key, 'entrada', e.target.value)}
+                            className="w-32"
+                            value={horarios?.[d.key]?.manana?.entrada || ''}
+                            onChange={(e) => actualizarHorarioDia(d.key, 'manana', 'entrada', e.target.value)}
                             disabled={isLoadingHorario}
                           />
                         </td>
                         <td className="px-4 py-2">
                           <Input
                             type="time"
-                            className="w-36"
-                            value={horarios?.[d.key]?.salida || ''}
-                            onChange={(e) => actualizarHorarioDia(d.key, 'salida', e.target.value)}
+                            className="w-32"
+                            value={horarios?.[d.key]?.manana?.salida || ''}
+                            onChange={(e) => actualizarHorarioDia(d.key, 'manana', 'salida', e.target.value)}
+                            disabled={isLoadingHorario}
+                          />
+                        </td>
+                        <td className="px-4 py-2 border-l">
+                          <Input
+                            type="time"
+                            className="w-32"
+                            value={horarios?.[d.key]?.tarde?.entrada || ''}
+                            onChange={(e) => actualizarHorarioDia(d.key, 'tarde', 'entrada', e.target.value)}
+                            disabled={isLoadingHorario}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Input
+                            type="time"
+                            className="w-32"
+                            value={horarios?.[d.key]?.tarde?.salida || ''}
+                            onChange={(e) => actualizarHorarioDia(d.key, 'tarde', 'salida', e.target.value)}
                             disabled={isLoadingHorario}
                           />
                         </td>

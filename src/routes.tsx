@@ -13,6 +13,7 @@ import GestionProduccion from './pages/GestionProduccion';
 import AdminControlProduccion from './pages/AdminControlProduccion';
 import ReportesProduccion from './pages/ReportesProduccion';
 import MantenimientoAsistencias from './pages/MantenimientoAsistencias';
+import ControlAsistencia from './pages/ControlAsistencia';
 
 interface RouteConfig {
   name: string;
@@ -76,6 +77,11 @@ const routes: RouteConfig[] = [
     name: 'Mantenimiento de Asistencia',
     path: '/mantenimiento/asistencias',
     element: <MantenimientoAsistencias />
+  },
+  {
+    name: 'Control de Asistencia',
+    path: '/control-asistencia',
+    element: <ControlAsistencia />
   },
   {
     name: 'Organigrama',
