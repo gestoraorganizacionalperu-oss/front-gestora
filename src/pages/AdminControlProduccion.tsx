@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Save } from 'lucide-react';
+import { Save, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMessage } from '@/contexts/MessageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   produccionService,
   aplanarMatrizProcesos,
+  calcularHorasDecimal,
+  formatoDecimalAHoraMin,
   type ConfigCtrlProduccion,
   type ActividadProduccion,
   type DiaSemana,
@@ -46,21 +48,46 @@ const SelectorResponsable: React.FC<{
   onChange: (valor: string) => void;
   trabajadores: Trabajador[];
   disabled?: boolean;
-}> = ({ valor, onChange, trabajadores, disabled }) => (
-  <select
-    value={valor}
-    onChange={(e) => onChange(e.target.value)}
-    disabled={disabled}
-    className="text-xs border border-input rounded px-1 py-1 bg-background w-full min-w-[110px] disabled:opacity-60 disabled:cursor-not-allowed"
-  >
-    <option value="">Sin asignar</option>
-    {trabajadores.map((t) => (
-      <option key={t._id} value={String(t._id)}>
-        {t.nombres}
-      </option>
-    ))}
-  </select>
-);
+}> = ({ valor, onChange, trabajadores, disabled }) => {
+  const [editando, setEditando] = useState(false);
+  const nombre = trabajadores.find((t) => String(t._id) === valor)?.nombres;
+
+  if (editando) {
+    return (
+      <select
+        autoFocus
+        value={valor}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setEditando(false);
+        }}
+        onBlur={() => setEditando(false)}
+        disabled={disabled}
+        className="text-xs border border-input rounded px-1 py-1 bg-background w-full min-w-[110px] disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <option value="">Sin asignar</option>
+        {trabajadores.map((t) => (
+          <option key={t._id} value={String(t._id)}>
+            {t.nombres}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && setEditando(true)}
+      disabled={disabled}
+      title={disabled ? undefined : 'Clic para cambiar responsable'}
+      className="text-xs w-full flex items-center justify-between gap-1 px-1 py-1 rounded truncate hover:bg-muted/60 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+    >
+      <span className="truncate">{nombre || <span className="text-muted-foreground">Sin asignar</span>}</span>
+      {!disabled && <ChevronDown className="w-3 h-3 shrink-0 text-muted-foreground" />}
+    </button>
+  );
+};
 
 const AdminControlProduccion: React.FC = () => {
   const { showMessage } = useMessage();
@@ -77,6 +104,16 @@ const AdminControlProduccion: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [hayCambios, setHayCambios] = useState(false);
+  // trabajadorId sugerido por Matriz de Procesos para cada actividad (por
+  // actividadId) -- se usa solo para el botón "Rellenar vacíos desde
+  // Matriz", nunca se aplica automáticamente sobre datos ya guardados.
+  const [trabajadorIdPorActividad, setTrabajadorIdPorActividad] = useState<Map<string, string>>(new Map());
+  const [rellenando, setRellenando] = useState(false);
+  // Por defecto, la columna "Resp." de cada día queda oculta (colapsada)
+  // para que la tabla se vea más limpia -- se muestra solo al presionar
+  // el botón "Editar responsables".
+  const [mostrarResponsables, setMostrarResponsables] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
 
   useEffect(() => {
     cargarTodo();
@@ -118,6 +155,11 @@ const AdminControlProduccion: React.FC = () => {
       // info, se completa vacía (o con el responsable sugerido por la
       // matriz) en vez de desaparecer.
       const maestras = aplanarMatrizProcesos(macroprocesos);
+      const trabajadorIdPorActividadTemp = new Map<string, string>();
+      maestras.forEach((m) => {
+        if (m.trabajadorId != null) trabajadorIdPorActividadTemp.set(m.actividadId, String(m.trabajadorId));
+      });
+      setTrabajadorIdPorActividad(trabajadorIdPorActividadTemp);
       const configPorId = new Map((cfg?.actividades || []).map((a) => [a.actividadId, a]));
 
       const fusionadas: ActividadProduccion[] = maestras.map((m) => {
@@ -130,9 +172,17 @@ const AdminControlProduccion: React.FC = () => {
           // ese valor legado como punto de partida para no perder la
           // asignación previa.
           const legado = (existente as any).responsableId as string | undefined;
-          const conResponsablePorDia = (dia?: { hProg: string; cantPro: string; responsableId?: string }) => ({
+          const conResponsablePorDia = (dia?: {
+            hProg: string;
+            cantPro: string;
+            horaInicio?: string;
+            horaFin?: string;
+            responsableId?: string;
+          }) => ({
             hProg: dia?.hProg || '',
             cantPro: dia?.cantPro || '',
+            horaInicio: dia?.horaInicio || '',
+            horaFin: dia?.horaFin || '',
             responsableId: dia?.responsableId ?? legado ?? '',
           });
 
@@ -150,12 +200,13 @@ const AdminControlProduccion: React.FC = () => {
           };
         }
 
-        // Sin datos guardados: intenta sugerir el responsable por nombre,
-        // cruzando el "puesto" de la matriz con la lista de trabajadores.
-        const sugerido = trabs.find(
-          (t) => m.puestoNombre && t.nombres.toUpperCase().includes(m.puestoNombre.toUpperCase().split(' ')[0])
-        );
-        const sugeridoId = sugerido ? String(sugerido._id) : '';
+        // Sin datos guardados: sugerimos el responsable usando el
+        // trabajadorId real que viene de Matriz de Procesos (ya no
+        // adivinamos por coincidencia de texto en el nombre).
+        const sugeridoId =
+          m.trabajadorId != null && trabs.some((t) => String(t._id) === String(m.trabajadorId))
+            ? String(m.trabajadorId)
+            : '';
         const diaConSugerido = () => ({ hProg: '', cantPro: '', responsableId: sugeridoId });
 
         return {
@@ -184,15 +235,20 @@ const AdminControlProduccion: React.FC = () => {
   const actualizarCelda = (
     actividadId: string,
     dia: DiaSemana,
-    campo: 'hProg' | 'cantPro',
+    campo: 'hProg' | 'cantPro' | 'horaInicio' | 'horaFin',
     valor: string
   ) => {
     setActividades((prev) =>
-      prev.map((a) =>
-        a.actividadId === actividadId
-          ? { ...a, [dia]: { ...a[dia], [campo]: valor } }
-          : a
-      )
+      prev.map((a) => {
+        if (a.actividadId !== actividadId) return a;
+        const diaActualizado = { ...a[dia], [campo]: valor };
+        // Si se editó Hora Inicio u Hora Fin, recalculamos H.Prog
+        // automáticamente -- ya no se escribe a mano.
+        if (campo === 'horaInicio' || campo === 'horaFin') {
+          diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+        }
+        return { ...a, [dia]: diaActualizado };
+      })
     );
     setHayCambios(true);
   };
@@ -225,6 +281,25 @@ const AdminControlProduccion: React.FC = () => {
     setHayCambios(true);
   };
 
+  const actualizarCampoProyectoOtro = (
+    dia: DiaSemana,
+    campo: 'hProg' | 'cantPro' | 'horaInicio' | 'horaFin',
+    valor: string
+  ) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const diaActualizado = { ...prev.proyectoOtro?.[dia], [campo]: valor };
+      if (campo === 'horaInicio' || campo === 'horaFin') {
+        diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+      }
+      return {
+        ...prev,
+        proyectoOtro: { ...prev.proyectoOtro, [dia]: diaActualizado },
+      };
+    });
+    setHayCambios(true);
+  };
+
   // Guarda únicamente en config_ctrl_produccion. Este módulo ya NO escribe
   // en Matriz de Procesos bajo ninguna circunstancia -- Matriz de Procesos
   // es la fuente maestra de actividades (qué existe), mientras que este
@@ -247,6 +322,71 @@ const AdminControlProduccion: React.FC = () => {
     }
   };
 
+  // Rellena SOLO los días que dicen "Sin asignar" (responsableId vacío),
+  // usando el trabajadorId sugerido por Matriz de Procesos para esa
+  // actividad. Nunca toca un día que ya tenga alguien asignado -- eso
+  // quedaría exactamente como estaba, aunque sea distinto al de la Matriz.
+  // No escribe nada en Matriz de Procesos, solo lee de ahí.
+  const handleRellenarVacios = async () => {
+    try {
+      setRellenando(true);
+      let celdasRellenadas = 0;
+
+      const actividadesActualizadas = actividades.map((act) => {
+        const sugeridoId = trabajadorIdPorActividad.get(act.actividadId);
+        if (!sugeridoId) return act;
+
+        const rellenarDia = (dia: { hProg: string; cantPro: string; responsableId?: string }) => {
+          if (dia.responsableId) return dia; // ya tiene alguien, no se toca
+          celdasRellenadas += 1;
+          return { ...dia, responsableId: sugeridoId };
+        };
+
+        return {
+          ...act,
+          lunes: rellenarDia(act.lunes),
+          martes: rellenarDia(act.martes),
+          miercoles: rellenarDia(act.miercoles),
+          jueves: rellenarDia(act.jueves),
+          viernes: rellenarDia(act.viernes),
+          sabado: rellenarDia(act.sabado),
+        };
+      });
+
+      setActividades(actividadesActualizadas);
+      if (celdasRellenadas > 0) {
+        setHayCambios(true);
+        showMessage('success', `Se rellenaron ${celdasRellenadas} celda(s) vacía(s) desde Matriz de Procesos. Presiona "Guardar" para confirmar.`);
+      } else {
+        showMessage('success', 'No había celdas vacías con un responsable sugerido disponible en la Matriz.');
+      }
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al rellenar los responsables');
+    } finally {
+      setRellenando(false);
+    }
+  };
+
+  // Filtra por Proceso, Subproceso, Actividad, o el nombre del Responsable
+  // asignado en cualquier día de la semana (sin distinguir mayúsculas).
+  const actividadesFiltradas = busqueda.trim()
+    ? actividades.filter((act) => {
+        const termino = busqueda.trim().toLowerCase();
+        const coincideDatosBasicos =
+          act.procesoNombre.toLowerCase().includes(termino) ||
+          act.subprocesoNombre.toLowerCase().includes(termino) ||
+          act.actividadNombre.toLowerCase().includes(termino);
+        if (coincideDatosBasicos) return true;
+
+        return DIAS.some((d) => {
+          const responsableId = act[d.key]?.responsableId;
+          if (!responsableId) return false;
+          const nombre = trabajadores.find((t) => String(t._id) === responsableId)?.nombres || '';
+          return nombre.toLowerCase().includes(termino);
+        });
+      })
+    : actividades;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -261,6 +401,20 @@ const AdminControlProduccion: React.FC = () => {
         )}
         {puedeEditar && (
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setMostrarResponsables((v) => !v)}
+            >
+              {mostrarResponsables ? 'Ocultar responsables' : 'Editar responsables'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleRellenarVacios}
+              disabled={rellenando || guardando}
+              title="Rellena solo las celdas 'Sin asignar' usando el responsable definido en Matriz de Procesos. Nunca toca los días que ya tienen alguien asignado."
+            >
+              {rellenando ? 'Rellenando...' : 'Rellenar vacíos desde Matriz'}
+            </Button>
             <Button onClick={handleGuardar} disabled={!hayCambios || guardando}>
               <Save className="w-4 h-4 mr-2" />
               {guardando ? 'Guardando...' : 'Guardar'}
@@ -268,6 +422,14 @@ const AdminControlProduccion: React.FC = () => {
           </div>
         )}
       </div>
+
+      <input
+        type="text"
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        placeholder="Buscar por proceso, subproceso, actividad o responsable..."
+        className="w-full max-w-md text-sm border border-input rounded-md px-3 py-2 bg-background"
+      />
 
       <div className="border rounded-lg bg-card overflow-x-auto">
         <table className="w-full table-auto border-collapse">
@@ -277,15 +439,17 @@ const AdminControlProduccion: React.FC = () => {
               <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Subproceso</th>
               <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Actividades</th>
               {DIAS.map((d) => (
-                <th key={d.key} className={`${celdaHeaderEstilo} text-center`} colSpan={3}>{d.label}</th>
+                <th key={d.key} className={`${celdaHeaderEstilo} text-center`} colSpan={mostrarResponsables ? 5 : 4}>{d.label}</th>
               ))}
             </tr>
             <tr>
               {DIAS.map((d) => (
                 <React.Fragment key={d.key}>
+                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Inicio</th>
+                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Fin</th>
                   <th className={`${celdaHeaderEstilo} text-center`}>H.Prog</th>
                   <th className={`${celdaHeaderEstilo} text-center`}>Cant.Pro</th>
-                  <th className={`${celdaHeaderEstilo} text-center`}>Resp.</th>
+                  {mostrarResponsables && <th className={`${celdaHeaderEstilo} text-center`}>Resp.</th>}
                 </React.Fragment>
               ))}
             </tr>
@@ -293,18 +457,20 @@ const AdminControlProduccion: React.FC = () => {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={21} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
+                <td colSpan={3 + DIAS.length * (mostrarResponsables ? 5 : 4)} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
                   Cargando configuración...
                 </td>
               </tr>
-            ) : actividades.length === 0 ? (
+            ) : actividadesFiltradas.length === 0 ? (
               <tr>
-                <td colSpan={21} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
-                  No hay actividades en la Matriz de Procesos todavía
+                <td colSpan={3 + DIAS.length * (mostrarResponsables ? 5 : 4)} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
+                  {busqueda.trim()
+                    ? `No se encontraron actividades para "${busqueda}".`
+                    : 'No hay actividades en la Matriz de Procesos todavía'}
                 </td>
               </tr>
             ) : (
-              actividades.map((act) => (
+              actividadesFiltradas.map((act) => (
                 <tr key={act.actividadId}>
                   <td className={`${celdaEstilo} text-muted-foreground`}>{act.procesoNombre}</td>
                   <td className={`${celdaEstilo} text-muted-foreground`}>{act.subprocesoNombre}</td>
@@ -312,12 +478,25 @@ const AdminControlProduccion: React.FC = () => {
                   {DIAS.map((d) => (
                     <React.Fragment key={d.key}>
                       <td className={celdaEstilo}>
-                        <CampoNumero
-                          valor={act[d.key]?.hProg || ''}
-                          onChange={(v) => actualizarCelda(act.actividadId, d.key, 'hProg', v)}
-                          placeholder="—"
-                        disabled={!puedeEditar}
+                        <input
+                          type="time"
+                          value={act[d.key]?.horaInicio || ''}
+                          onChange={(e) => actualizarCelda(act.actividadId, d.key, 'horaInicio', e.target.value)}
+                          disabled={!puedeEditar}
+                          className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                         />
+                      </td>
+                      <td className={celdaEstilo}>
+                        <input
+                          type="time"
+                          value={act[d.key]?.horaFin || ''}
+                          onChange={(e) => actualizarCelda(act.actividadId, d.key, 'horaFin', e.target.value)}
+                          disabled={!puedeEditar}
+                          className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                      <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                        {formatoDecimalAHoraMin(act[d.key]?.hProg)}
                       </td>
                       <td className={celdaEstilo}>
                         <CampoNumero
@@ -327,14 +506,16 @@ const AdminControlProduccion: React.FC = () => {
                         disabled={!puedeEditar}
                         />
                       </td>
-                      <td className={celdaEstilo}>
-                        <SelectorResponsable
-                          valor={act[d.key]?.responsableId || ''}
-                          onChange={(v) => actualizarResponsableDia(act.actividadId, d.key, v)}
-                          trabajadores={trabajadores}
-                          disabled={!puedeEditar}
-                        />
-                      </td>
+                      {mostrarResponsables && (
+                        <td className={celdaEstilo}>
+                          <SelectorResponsable
+                            valor={act[d.key]?.responsableId || ''}
+                            onChange={(v) => actualizarResponsableDia(act.actividadId, d.key, v)}
+                            trabajadores={trabajadores}
+                            disabled={!puedeEditar}
+                          />
+                        </td>
+                      )}
                     </React.Fragment>
                   ))}
                 </tr>
@@ -361,55 +542,44 @@ const AdminControlProduccion: React.FC = () => {
                 {DIAS.map((d) => (
                   <React.Fragment key={d.key}>
                     <td className={celdaEstilo}>
-                      <CampoNumero
-                        valor={config.proyectoOtro?.[d.key]?.hProg || ''}
-                        onChange={(v) =>
-                          setConfig((prev) => {
-                            if (!prev) return prev;
-                            const actualizado = {
-                              ...prev,
-                              proyectoOtro: {
-                                ...prev.proyectoOtro,
-                                [d.key]: { ...prev.proyectoOtro?.[d.key], hProg: v },
-                              },
-                            };
-                            setHayCambios(true);
-                            return actualizado;
-                          })
-                        }
-                        placeholder="—"
-                      disabled={!puedeEditar}
+                      <input
+                        type="time"
+                        value={config.proyectoOtro?.[d.key]?.horaInicio || ''}
+                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaInicio', e.target.value)}
+                        disabled={!puedeEditar}
+                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                       />
+                    </td>
+                    <td className={celdaEstilo}>
+                      <input
+                        type="time"
+                        value={config.proyectoOtro?.[d.key]?.horaFin || ''}
+                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaFin', e.target.value)}
+                        disabled={!puedeEditar}
+                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                    </td>
+                    <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                      {formatoDecimalAHoraMin(config.proyectoOtro?.[d.key]?.hProg)}
                     </td>
                     <td className={celdaEstilo}>
                       <CampoNumero
                         valor={config.proyectoOtro?.[d.key]?.cantPro || ''}
-                        onChange={(v) =>
-                          setConfig((prev) => {
-                            if (!prev) return prev;
-                            const actualizado = {
-                              ...prev,
-                              proyectoOtro: {
-                                ...prev.proyectoOtro,
-                                [d.key]: { ...prev.proyectoOtro?.[d.key], cantPro: v },
-                              },
-                            };
-                            setHayCambios(true);
-                            return actualizado;
-                          })
-                        }
+                        onChange={(v) => actualizarCampoProyectoOtro(d.key, 'cantPro', v)}
                         placeholder="—"
                       disabled={!puedeEditar}
                       />
                     </td>
-                    <td className={celdaEstilo}>
-                      <SelectorResponsable
-                        valor={config.proyectoOtro?.[d.key]?.responsableId || ''}
-                        onChange={(v) => actualizarResponsableDiaProyectoOtro(d.key, v)}
-                        trabajadores={trabajadores}
-                        disabled={!puedeEditar}
-                      />
-                    </td>
+                    {mostrarResponsables && (
+                      <td className={celdaEstilo}>
+                        <SelectorResponsable
+                          valor={config.proyectoOtro?.[d.key]?.responsableId || ''}
+                          onChange={(v) => actualizarResponsableDiaProyectoOtro(d.key, v)}
+                          trabajadores={trabajadores}
+                          disabled={!puedeEditar}
+                        />
+                      </td>
+                    )}
                   </React.Fragment>
                 ))}
               </tr>

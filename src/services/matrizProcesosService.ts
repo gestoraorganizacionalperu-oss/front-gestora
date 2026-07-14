@@ -4,6 +4,9 @@ import httpClient from './httpClient';
 export interface Puesto {
   id: string | null;
   nombre?: string;
+  // ID del Trabajador específico que ocupa este Puesto en esta actividad
+  // (un mismo Puesto/cargo puede tener varias personas asignadas).
+  trabajadorId?: string | number | null;
 }
 
 // Descripción

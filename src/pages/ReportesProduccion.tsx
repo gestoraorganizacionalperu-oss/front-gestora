@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardList, CheckCircle2, Clock, Target, Gauge, Timer, Activity } from 'lucide-react';
+import { ClipboardList, CheckCircle2, Clock, Target, Gauge, Timer, Activity, ChevronDown, ChevronRight } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { useMessage } from '@/contexts/MessageContext';
 import {
@@ -103,6 +103,9 @@ const ReportesProduccion: React.FC = () => {
   const [registrosHoyCompletos, setRegistrosHoyCompletos] = useState<any[]>([]);
   const [registrosRangoCompletos, setRegistrosRangoCompletos] = useState<any[]>([]);
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  // Actividades cuya fila está expandida, mostrando el detalle de cada
+  // sesión individual del historial de hoy (no solo el acumulado).
+  const [filasExpandidas, setFilasExpandidas] = useState<Set<string>>(new Set());
 
   // Carga la lista de trabajadores una sola vez (para mostrar nombres reales)
   useEffect(() => {
@@ -395,33 +398,105 @@ const ReportesProduccion: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              filasDetalladaAgrupadas.map((f) => (
-                <tr key={f.actividadId}>
-                  {f.procesoRowSpan > 0 && (
-                    <td rowSpan={f.procesoRowSpan} className={`${celdaEstilo} font-medium align-top`}>
-                      {f.procesoNombre}
-                    </td>
-                  )}
-                  {f.subprocesoRowSpan > 0 && (
-                    <td rowSpan={f.subprocesoRowSpan} className={`${celdaEstilo} align-top`}>
-                      {f.subprocesoNombre}
-                    </td>
-                  )}
-                  <td className={`${celdaEstilo} font-medium`}>{f.actividadNombre}</td>
-                  <td className={`${celdaEstilo} text-center`}>—</td>
-                  <td className={`${celdaEstilo} text-center`}>{f.horaInicioReal || '—'}</td>
-                  <td className={`${celdaEstilo} text-center`}>—</td>
-                  <td className={`${celdaEstilo} text-center`}>{f.horaFinReal || '—'}</td>
-                  <td className={`${celdaEstilo} text-center`}>{f.cantPro || '—'}</td>
-                  <td className={`${celdaEstilo} text-center`}>{f.cantReal > 0 ? f.cantReal : '—'}</td>
-                  <td className={`${celdaEstilo} text-muted-foreground`}>{f.observaciones}</td>
-                  <td className={celdaEstilo}>
-                    <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${colorEstadoResponsable(f.yaIniciado)}`}>
-                      {nombreResponsable(f.responsableId)}
-                    </span>
-                  </td>
-                </tr>
-              ))
+              filasDetalladaAgrupadas.map((f, index) => {
+                const tieneSesiones = f.sesiones.length > 0;
+                const expandida = filasExpandidas.has(f.actividadId);
+
+                // El rowSpan de Proceso/Subproceso se calculó asumiendo 1
+                // <tr> por actividad -- si alguna actividad del mismo grupo
+                // está expandida, hay que sumarle sus filas de sesión extra
+                // para que el rowSpan siga cubriendo el grupo correctamente.
+                const extraFilas = (fila: typeof f) =>
+                  filasExpandidas.has(fila.actividadId) ? fila.sesiones.length : 0;
+                const procesoRowSpanAjustado =
+                  f.procesoRowSpan > 0
+                    ? filasDetalladaAgrupadas
+                        .slice(index, index + f.procesoRowSpan)
+                        .reduce((total, fila) => total + 1 + extraFilas(fila), 0)
+                    : 0;
+                const subprocesoRowSpanAjustado =
+                  f.subprocesoRowSpan > 0
+                    ? filasDetalladaAgrupadas
+                        .slice(index, index + f.subprocesoRowSpan)
+                        .reduce((total, fila) => total + 1 + extraFilas(fila), 0)
+                    : 0;
+
+                return (
+                  <React.Fragment key={f.actividadId}>
+                    <tr>
+                      {f.procesoRowSpan > 0 && (
+                        <td rowSpan={procesoRowSpanAjustado} className={`${celdaEstilo} font-medium align-top`}>
+                          {f.procesoNombre}
+                        </td>
+                      )}
+                      {f.subprocesoRowSpan > 0 && (
+                        <td rowSpan={subprocesoRowSpanAjustado} className={`${celdaEstilo} align-top`}>
+                          {f.subprocesoNombre}
+                        </td>
+                      )}
+                      <td className={`${celdaEstilo} font-medium`}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!tieneSesiones) return;
+                            setFilasExpandidas((prev) => {
+                              const nuevo = new Set(prev);
+                              if (nuevo.has(f.actividadId)) nuevo.delete(f.actividadId);
+                              else nuevo.add(f.actividadId);
+                              return nuevo;
+                            });
+                          }}
+                          disabled={!tieneSesiones}
+                          className="flex items-center gap-1 text-left disabled:cursor-default"
+                          title={tieneSesiones ? `Ver ${f.sesiones.length} sesión(es) del historial de hoy` : undefined}
+                        >
+                          {tieneSesiones ? (
+                            expandida ? (
+                              <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                            )
+                          ) : (
+                            <span className="w-3.5 shrink-0" />
+                          )}
+                          <span>{f.actividadNombre}</span>
+                          {tieneSesiones && (
+                            <span className="text-xs text-muted-foreground">({f.sesiones.length})</span>
+                          )}
+                        </button>
+                      </td>
+                      <td className={`${celdaEstilo} text-center`}>{f.horaInicioProg || '—'}</td>
+                      <td className={`${celdaEstilo} text-center`}>{f.horaInicioReal || '—'}</td>
+                      <td className={`${celdaEstilo} text-center`}>{f.horaFinProg || '—'}</td>
+                      <td className={`${celdaEstilo} text-center`}>{f.horaFinReal || '—'}</td>
+                      <td className={`${celdaEstilo} text-center`}>{f.cantPro || '—'}</td>
+                      <td className={`${celdaEstilo} text-center`}>{f.cantReal > 0 ? f.cantReal : '—'}</td>
+                      <td className={`${celdaEstilo} text-muted-foreground`}>{f.observaciones}</td>
+                      <td className={celdaEstilo}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${colorEstadoResponsable(f.yaIniciado)}`}>
+                          {nombreResponsable(f.responsableId)}
+                        </span>
+                      </td>
+                    </tr>
+                    {expandida &&
+                      f.sesiones.map((s, idx) => (
+                        <tr key={`${f.actividadId}-sesion-${idx}`} className="bg-muted/30">
+                          <td className={`${celdaEstilo} text-xs text-muted-foreground pl-8`}>
+                            Sesión {idx + 1}
+                          </td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>—</td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>{s.horaInicio || '—'}</td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>—</td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>{s.horaFin || '—'}</td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>—</td>
+                          <td className={`${celdaEstilo} text-center text-xs`}>{s.logrados || '—'}</td>
+                          <td className={`${celdaEstilo} text-xs text-muted-foreground`}>{s.observaciones || ''}</td>
+                          <td className={celdaEstilo}></td>
+                        </tr>
+                      ))}
+                  </React.Fragment>
+                );
+              })
             )}
           </tbody>
         </table>

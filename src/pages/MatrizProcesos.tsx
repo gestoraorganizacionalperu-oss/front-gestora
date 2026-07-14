@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit } from 'lucide-react';
+import { Plus, Trash2, Edit, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMessage } from '@/contexts/MessageContext';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -18,6 +18,7 @@ import ElementFormDialog from '@/components/matriz/ElementFormDialog';
 import DeleteConfirmDialog from '@/components/matriz/DeleteConfirmDialog';
 import PuestoFormDialog from '@/components/matriz/PuestoFormDialog';
 import { DocumentoSubProcesoView } from '@/components/documento/DocumentoSubProcesoView';
+import { asistenciaService } from '@/services/asistenciaService';
 
 interface CellData {
   content: React.ReactNode;
@@ -41,6 +42,25 @@ const MatrizProcesos: React.FC = () => {
   const [busqueda, setBusqueda] = useState('');
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const [puestosMap, setPuestosMap] = useState<Map<string, string>>(new Map());
+  // Mapa inverso: puestoId -> nombre del Trabajador que tiene ese Puesto
+  // asignado (configurado en Mantenimiento de Asistencias). La columna
+  // "Puesto" de la tabla muestra este nombre en vez del nombre genérico
+  // del Puesto, para que en una empresa pequeña se vea directamente
+  // "quién" hace la actividad.
+  const [trabajadorPorPuestoMap, setTrabajadorPorPuestoMap] = useState<Map<string, string>>(new Map());
+  // Mapa directo (sin ambigüedad): trabajadorId -> nombre. Se usa cuando la
+  // actividad ya tiene guardado un trabajadorId específico (nuevo formato).
+  // El mapa inverso de arriba (por puestoId) queda solo como respaldo para
+  // datos guardados ANTES de este cambio, donde varias personas podían
+  // compartir el mismo Puesto sin forma de distinguir cuál era.
+  const [nombrePorTrabajadorId, setNombrePorTrabajadorId] = useState<Map<string, string>>(new Map());
+
+  // Drag & drop para reordenar (macro/proceso/subproceso/subprocesohijo/actividad).
+  // El orden se persiste tal cual el orden del arreglo JSON -- el backend no
+  // reordena nada, solo guarda la matriz completa como se le envía.
+  const [dragItem, setDragItem] = useState<{ type: CellData['type']; path: number[] } | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [isReordering, setIsReordering] = useState(false);
 
   // Ref para el contenedor con scroll horizontal
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
@@ -76,6 +96,7 @@ const MatrizProcesos: React.FC = () => {
   const [puestoContext, setPuestoContext] = useState<{
     path: number[];
     currentPuestoId?: string | null;
+    currentTrabajadorId?: string | number | null;
     isEdit?: boolean;
   } | null>(null);
 
@@ -116,6 +137,22 @@ const MatrizProcesos: React.FC = () => {
         }
       }
       setPuestosMap(puestosMapTemp);
+
+      // Construir el mapa inverso: puestoId -> nombre del Trabajador
+      // (respaldo para datos guardados antes del campo trabajadorId)
+      try {
+        const trabajadores = await asistenciaService.getTrabajadores();
+        const trabajadorPorPuestoTemp = new Map<string, string>();
+        const nombrePorTrabajadorIdTemp = new Map<string, string>();
+        trabajadores.forEach((t) => {
+          if (t.puesto) trabajadorPorPuestoTemp.set(t.puesto, t.nombres);
+          nombrePorTrabajadorIdTemp.set(String(t._id), t.nombres);
+        });
+        setTrabajadorPorPuestoMap(trabajadorPorPuestoTemp);
+        setNombrePorTrabajadorId(nombrePorTrabajadorIdTemp);
+      } catch (error) {
+        console.error('Error al cargar trabajadores para mostrar nombre por puesto:', error);
+      }
     } catch (error: any) {
       showMessage('error', error.message || 'Error al cargar los datos');
     } finally {
@@ -310,12 +347,12 @@ const MatrizProcesos: React.FC = () => {
               nombre: macro.nombre,
               hasChildren: false,
             },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
-            { content: null, rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+            { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
           ],
         });
       } else {
@@ -344,11 +381,11 @@ const MatrizProcesos: React.FC = () => {
                   nombre: proceso.nombre,
                   hasChildren: false,
                 },
-                { content: null, rowSpan: 1, path: [], type: 'empty' },
-                { content: null, rowSpan: 1, path: [], type: 'empty' },
-                { content: null, rowSpan: 1, path: [], type: 'empty' },
-                { content: null, rowSpan: 1, path: [], type: 'empty' },
-                { content: null, rowSpan: 1, path: [], type: 'empty' },
+                { content: renderSubprocesoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex], type: 'subproceso', nombre: '', hasChildren: false },
+                { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+                { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+                { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+                { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
               ],
             });
             macroRowsProcessed += 1;
@@ -391,10 +428,10 @@ const MatrizProcesos: React.FC = () => {
                       nombre: subProceso.nombre,
                       hasChildren: false,
                     },
-                    { content: null, rowSpan: 1, path: [], type: 'empty' },
-                    { content: null, rowSpan: 1, path: [], type: 'empty' },
-                    { content: null, rowSpan: 1, path: [], type: 'empty' },
-                    { content: null, rowSpan: 1, path: [], type: 'empty' },
+                    { content: renderSubprocesoHijoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subprocesohijo', nombre: '', hasChildren: false },
+                    { content: renderActividadVacia(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'actividad', nombre: '', hasChildren: false },
+                    { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+                    { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
                   ],
                 });
                 macroRowsProcessed += 1;
@@ -412,10 +449,10 @@ const MatrizProcesos: React.FC = () => {
                           macroRowsProcessed === 0 ? { content: renderCell(macro.nombre, 'macro', [macroIndex], true), rowSpan: macroRowSpan, path: [macroIndex], type: 'macro', nombre: macro.nombre, hasChildren: true } : null,
                           procesoRowsProcessed === 0 ? { content: renderCell(proceso.nombre, 'proceso', [macroIndex, procesoIndex], true), rowSpan: procesoRowSpan, path: [macroIndex, procesoIndex], type: 'proceso', nombre: proceso.nombre, hasChildren: true } : null,
                           subProcesoRowsProcessed === 0 ? { content: renderSubProcesoCell(macro, proceso, subProceso, [macroIndex, procesoIndex, subProcesoIndex], true), rowSpan: subProcesoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subproceso', nombre: subProceso.nombre, hasChildren: true } : null,
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
+                          { content: renderSubprocesoHijoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subprocesohijo', nombre: '', hasChildren: false },
                           { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], false), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: false },
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
+                          { content: renderDescripcionVacia(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, -1], type: 'descripcion', nombre: '', hasChildren: false },
+                          { content: renderPuestoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'puesto', nombre: '', hasChildren: false },
                         ],
                       });
                       macroRowsProcessed += 1;
@@ -432,10 +469,10 @@ const MatrizProcesos: React.FC = () => {
                               macroRowsProcessed === 0 ? { content: renderCell(macro.nombre, 'macro', [macroIndex], true), rowSpan: macroRowSpan, path: [macroIndex], type: 'macro', nombre: macro.nombre, hasChildren: true } : null,
                               procesoRowsProcessed === 0 ? { content: renderCell(proceso.nombre, 'proceso', [macroIndex, procesoIndex], true), rowSpan: procesoRowSpan, path: [macroIndex, procesoIndex], type: 'proceso', nombre: proceso.nombre, hasChildren: true } : null,
                               subProcesoRowsProcessed === 0 ? { content: renderSubProcesoCell(macro, proceso, subProceso, [macroIndex, procesoIndex, subProcesoIndex], true), rowSpan: subProcesoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subproceso', nombre: subProceso.nombre, hasChildren: true } : null,
-                              { content: null, rowSpan: 1, path: [], type: 'empty' },
+                              { content: renderSubprocesoHijoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subprocesohijo', nombre: '', hasChildren: false },
                               actividadRowsProcessed === 0 ? { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], true), rowSpan: actividadRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: true } : null,
                               { content: renderDescripcionCell(descripcion, [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex], type: 'descripcion', nombre: descripcion.texto, hasChildren: false },
-                              { content: null, rowSpan: 1, path: [], type: 'empty' },
+                              { content: renderPuestoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'puesto', nombre: '', hasChildren: false },
                             ],
                           });
                           macroRowsProcessed += 1;
@@ -449,10 +486,10 @@ const MatrizProcesos: React.FC = () => {
                                 macroRowsProcessed === 0 ? { content: renderCell(macro.nombre, 'macro', [macroIndex], true), rowSpan: macroRowSpan, path: [macroIndex], type: 'macro', nombre: macro.nombre, hasChildren: true } : null,
                                 procesoRowsProcessed === 0 ? { content: renderCell(proceso.nombre, 'proceso', [macroIndex, procesoIndex], true), rowSpan: procesoRowSpan, path: [macroIndex, procesoIndex], type: 'proceso', nombre: proceso.nombre, hasChildren: true } : null,
                                 subProcesoRowsProcessed === 0 ? { content: renderSubProcesoCell(macro, proceso, subProceso, [macroIndex, procesoIndex, subProcesoIndex], true), rowSpan: subProcesoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subproceso', nombre: subProceso.nombre, hasChildren: true } : null,
-                                { content: null, rowSpan: 1, path: [], type: 'empty' },
+                                { content: renderSubprocesoHijoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subprocesohijo', nombre: '', hasChildren: false },
                                 actividadRowsProcessed === 0 ? { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], true), rowSpan: actividadRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: true } : null,
                                 descripcionRowsProcessed === 0 ? { content: renderDescripcionCell(descripcion, [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex]), rowSpan: descripcionRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex], type: 'descripcion', nombre: descripcion.texto, hasChildren: true } : null,
-                                { content: renderPuestoCell(puesto, [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex, puestoIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex, puestoIndex], type: 'puesto', nombre: puesto.nombre || getPuestoName(puesto.id), hasChildren: false },
+                                { content: renderPuestoCell(puesto, [macroIndex, procesoIndex, subProcesoIndex, actividadIndex, descripcionIndex, puestoIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, actividadIndex], type: 'puesto', nombre: getPuestoName(puesto.id, puesto.nombre, puesto.trabajadorId), hasChildren: false },
                               ],
                             });
                             macroRowsProcessed += 1;
@@ -480,9 +517,9 @@ const MatrizProcesos: React.FC = () => {
                           procesoRowsProcessed === 0 ? { content: renderCell(proceso.nombre, 'proceso', [macroIndex, procesoIndex], true), rowSpan: procesoRowSpan, path: [macroIndex, procesoIndex], type: 'proceso', nombre: proceso.nombre, hasChildren: true } : null,
                           subProcesoRowsProcessed === 0 ? { content: renderSubProcesoCell(macro, proceso, subProceso, [macroIndex, procesoIndex, subProcesoIndex], true), rowSpan: subProcesoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subproceso', nombre: subProceso.nombre, hasChildren: true } : null,
                           { content: renderCell(subHijo.nombre, 'subprocesohijo', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], false), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], type: 'subprocesohijo', nombre: subHijo.nombre, hasChildren: false },
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
-                          { content: null, rowSpan: 1, path: [], type: 'empty' },
+                          { content: renderActividadVacia(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, -1], type: 'actividad', nombre: '', hasChildren: false },
+                          { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
+                          { content: renderCeldaVaciaGenerica(), rowSpan: 1, path: [], type: 'empty' },
                         ],
                       });
                       macroRowsProcessed += 1;
@@ -501,8 +538,8 @@ const MatrizProcesos: React.FC = () => {
                               subProcesoRowsProcessed === 0 ? { content: renderSubProcesoCell(macro, proceso, subProceso, [macroIndex, procesoIndex, subProcesoIndex], true), rowSpan: subProcesoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex], type: 'subproceso', nombre: subProceso.nombre, hasChildren: true } : null,
                               subHijoRowsProcessed === 0 ? { content: renderCell(subHijo.nombre, 'subprocesohijo', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], true), rowSpan: subHijoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], type: 'subprocesohijo', nombre: subHijo.nombre, hasChildren: true } : null,
                               { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], false), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: false },
-                              { content: null, rowSpan: 1, path: [], type: 'empty' },
-                              { content: null, rowSpan: 1, path: [], type: 'empty' },
+                              { content: renderDescripcionVacia(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, -1], type: 'descripcion', nombre: '', hasChildren: false },
+                              { content: renderPuestoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'puesto', nombre: '', hasChildren: false },
                             ],
                           });
                           macroRowsProcessed += 1;
@@ -523,7 +560,7 @@ const MatrizProcesos: React.FC = () => {
                                   subHijoRowsProcessed === 0 ? { content: renderCell(subHijo.nombre, 'subprocesohijo', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], true), rowSpan: subHijoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], type: 'subprocesohijo', nombre: subHijo.nombre, hasChildren: true } : null,
                                   actividadRowsProcessed === 0 ? { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], true), rowSpan: actividadRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: true } : null,
                                   { content: renderDescripcionCell(descripcion, [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex], type: 'descripcion', nombre: descripcion.texto, hasChildren: false },
-                                  { content: null, rowSpan: 1, path: [], type: 'empty' },
+                                  { content: renderPuestoVacio(), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'puesto', nombre: '', hasChildren: false },
                                 ],
                               });
                               macroRowsProcessed += 1;
@@ -541,7 +578,7 @@ const MatrizProcesos: React.FC = () => {
                                     subHijoRowsProcessed === 0 ? { content: renderCell(subHijo.nombre, 'subprocesohijo', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], true), rowSpan: subHijoRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex], type: 'subprocesohijo', nombre: subHijo.nombre, hasChildren: true } : null,
                                     actividadRowsProcessed === 0 ? { content: renderCell(actividad.nombre, 'actividad', [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], true), rowSpan: actividadRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'actividad', nombre: actividad.nombre, hasChildren: true } : null,
                                     descripcionRowsProcessed === 0 ? { content: renderDescripcionCell(descripcion, [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex]), rowSpan: descripcionRowSpan, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex], type: 'descripcion', nombre: descripcion.texto, hasChildren: true } : null,
-                                    { content: renderPuestoCell(puesto, [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex, puestoIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex, puestoIndex], type: 'puesto', nombre: puesto.nombre || getPuestoName(puesto.id), hasChildren: false },
+                                    { content: renderPuestoCell(puesto, [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex, descripcionIndex, puestoIndex]), rowSpan: 1, path: [macroIndex, procesoIndex, subProcesoIndex, subHijoIndex, actividadIndex], type: 'puesto', nombre: getPuestoName(puesto.id, puesto.nombre, puesto.trabajadorId), hasChildren: false },
                                   ],
                                 });
                                 macroRowsProcessed += 1;
@@ -570,10 +607,18 @@ const MatrizProcesos: React.FC = () => {
 
   // Render cell content with edit button
   const renderCell = (nombre: string, type: string, path: number[], hasChildren: boolean) => {
+    const esReordenable = canUpdate && ['macro', 'proceso', 'subprocesohijo', 'actividad'].includes(type);
     return (
-      <div className="relative min-w-[180px]">
-        {/* Botones flotantes en la esquina superior derecha */}
-        <div className="float-right flex gap-1 ml-2">
+      <div className="min-w-[180px] flex items-start justify-between gap-2">
+        <div className="flex items-start gap-1 flex-1 min-w-0">
+          {esReordenable && (
+            <span className="p-1 -ml-1 mt-0.5 shrink-0 text-muted-foreground/50" title="Arrastra para reordenar">
+              <GripVertical className="w-4 h-4" />
+            </span>
+          )}
+          <p className="font-medium text-sm text-justify">{nombre}</p>
+        </div>
+        <div className="flex gap-1 shrink-0">
           {canCreate && type === 'macro' && (
             <button
               onClick={() => handleAdd('proceso', path)}
@@ -629,8 +674,6 @@ const MatrizProcesos: React.FC = () => {
             </button>
           )}
         </div>
-        {/* Texto que fluye alrededor de los botones */}
-        <p className="font-medium text-sm text-justify">{nombre}</p>
       </div>
     );
   };
@@ -639,7 +682,13 @@ const MatrizProcesos: React.FC = () => {
   const renderSubProcesoCell = (macro: MacroProceso, proceso: Proceso, subProceso: SubProceso, path: number[], hasChildren: boolean) => {
     return (
       <div className="flex flex-col gap-2 min-w-[200px]">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          {canUpdate && (
+            <span className="p-1 -ml-1 mt-0.5 shrink-0 text-muted-foreground/50" title="Arrastra para reordenar">
+              <GripVertical className="w-4 h-4" />
+            </span>
+          )}
+          <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <p className="font-medium text-sm">{subProceso.nombre}</p>
           </div>
@@ -665,6 +714,7 @@ const MatrizProcesos: React.FC = () => {
               )}
             </div>
           )}
+          </div>
         </div>
         
         {/* Botones de agregar en una sola fila */}
@@ -703,9 +753,16 @@ const MatrizProcesos: React.FC = () => {
   // Render descripcion cell as label with edit button
   const renderDescripcionCell = (descripcion: Descripcion, path: number[]) => {
     return (
-      <div className="relative min-w-[200px]">
-        {/* Botones flotantes en la esquina superior derecha */}
-        <div className="float-right flex gap-1 ml-2">
+      <div className="min-w-[200px] flex items-start justify-between gap-2">
+        <div className="flex items-start gap-1 flex-1 min-w-0">
+          {canUpdate && (
+            <span className="p-1 -ml-1 mt-0.5 shrink-0 text-muted-foreground/50" title="Arrastra para reordenar">
+              <GripVertical className="w-4 h-4" />
+            </span>
+          )}
+          <p className="text-sm text-justify">{descripcion.texto}</p>
+        </div>
+        <div className="flex gap-1 shrink-0">
           {canCreate && (
             <button
               onClick={() => handleAddPuesto(path)}
@@ -734,24 +791,29 @@ const MatrizProcesos: React.FC = () => {
             </button>
           )}
         </div>
-        {/* Texto justificado que fluye alrededor de los botones */}
-        <p className="text-sm text-justify">{descripcion.texto}</p>
       </div>
     );
   };
 
   // Render puesto cell with edit button
-  const renderPuestoCell = (puesto: { id: string | null; nombre?: string }, path: number[]) => {
-    const puestoNombre = puesto.nombre || getPuestoName(puesto.id);
-    
+  const renderPuestoCell = (puesto: { id: string | null; nombre?: string; trabajadorId?: string | number | null }, path: number[]) => {
+    const puestoNombre = getPuestoName(puesto.id, puesto.nombre, puesto.trabajadorId);
+
     return (
-      <div className="relative min-w-[150px]">
-        {/* Botones flotantes en la esquina superior derecha */}
+      <div className="min-w-[150px] flex items-start justify-between gap-2">
+        <div className="flex items-start gap-1 flex-1 min-w-0">
+          {canUpdate && (
+            <span className="p-1 -ml-1 mt-0.5 shrink-0 text-muted-foreground/50" title="Arrastra para mover a otra actividad">
+              <GripVertical className="w-4 h-4" />
+            </span>
+          )}
+          <p className="text-sm text-justify">{puestoNombre}</p>
+        </div>
         {(canUpdate || canDelete) && (
-          <div className="float-right flex gap-1 ml-2">
+          <div className="flex gap-1 shrink-0">
             {canUpdate && (
               <button
-                onClick={() => handleEditPuesto(puesto.id, path)}
+                onClick={() => handleEditPuesto(puesto.id, path, puesto.trabajadorId)}
                 className="p-1 hover:bg-blue-100 rounded text-blue-600"
                 title="Editar"
               >
@@ -769,11 +831,63 @@ const MatrizProcesos: React.FC = () => {
             )}
           </div>
         )}
-        {/* Texto que fluye alrededor de los botones */}
-        <p className="text-sm text-justify">{puestoNombre}</p>
       </div>
     );
   };
+
+  // Celda vacía genérica: mismo formato visual que las zonas "Soltar aquí"
+  // funcionales, para cuando la celda no tiene dato pero tampoco hay (todavía)
+  // una acción de arrastre coherente que conectar ahí (ej. Puesto cuando ni
+  // siquiera existe una Actividad en esa fila).
+  const renderCeldaVaciaGenerica = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      Soltar aquí
+    </div>
+  );
+
+  // Celda vacía en la columna Descripción: funciona como zona de "soltar
+  // aquí" para mover una Descripción (con sus Puestos) desde otra
+  // Actividad hacia esta, que no tiene ninguna todavía.
+  const renderDescripcionVacia = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      {canUpdate ? 'Soltar aquí' : ''}
+    </div>
+  );
+
+  // Celda vacía en la columna Actividad: funciona como zona de "soltar
+  // aquí" para mover una Actividad (existente en otro lado de la matriz)
+  // hacia este Subproceso que se quedó sin ninguna.
+  const renderActividadVacia = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      {canUpdate ? 'Soltar aquí' : ''}
+    </div>
+  );
+
+  // Celda vacía en la columna Subproceso Nivel 1: funciona como zona de
+  // "soltar aquí" para mover un Subproceso Nivel 1 (existente en otro Proceso)
+  // hacia este Proceso que se quedó sin ninguno.
+  const renderSubprocesoVacio = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      {canUpdate ? 'Soltar aquí' : ''}
+    </div>
+  );
+
+  // Celda vacía en la columna Subproceso Nivel 2: funciona como zona de
+  // "soltar aquí" para mover un Subproceso Nivel 2 (existente en otro lado
+  // de la matriz) hacia este Subproceso Nivel 1.
+  const renderSubprocesoHijoVacio = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      {canUpdate ? 'Soltar aquí' : ''}
+    </div>
+  );
+
+  // Celda vacía en la columna Puesto: funciona como zona de "soltar aquí"
+  // para asignarle un puesto arrastrado desde otra actividad.
+  const renderPuestoVacio = () => (
+    <div className="min-h-[56px] w-full rounded-md border-2 border-dashed transition-all flex items-center justify-center text-xs border-slate-300 text-slate-400 bg-slate-50">
+      {canUpdate ? 'Soltar aquí' : '—'}
+    </div>
+  );
 
   // Get cargo name by ID
   const getCargoName = (cargoId: string | null): string => {
@@ -783,10 +897,346 @@ const MatrizProcesos: React.FC = () => {
   };
 
   // Get puesto name by ID
-  const getPuestoName = (puestoId: string | null): string => {
-    if (!puestoId) return 'Sin asignar';
+  const getPuestoName = (puestoId: string | null, nombreGuardado?: string, trabajadorId?: string | number | null): string => {
+    // Prioridad 1: trabajadorId guardado directamente en la actividad (sin
+    // ambigüedad, funciona aunque varias personas compartan el mismo Puesto).
+    if (trabajadorId) {
+      const nombreDirecto = nombrePorTrabajadorId.get(String(trabajadorId));
+      if (nombreDirecto) return nombreDirecto;
+    }
+    if (!puestoId) return nombreGuardado || 'Sin asignar';
+    // Prioridad 2 (respaldo para datos guardados antes de tener
+    // trabajadorId): nombre de "alguna" persona que tiene este Puesto
+    // asignado -- puede estar equivocado si el Puesto es compartido.
+    const nombreTrabajador = trabajadorPorPuestoMap.get(puestoId);
+    if (nombreTrabajador) return nombreTrabajador;
     const nombre = puestosMap.get(puestoId);
-    return nombre || 'Desconocido';
+    return nombre || nombreGuardado || 'Desconocido';
+  };
+
+  // Dado un tipo y un path, devuelve el arreglo "hermano" donde vive ese
+  // elemento (para poder reordenarlo) junto con su índice actual dentro de
+  // ese arreglo. Replica exactamente la misma lógica de navegación por path
+  // que ya usan handleFormSubmit/handleDeleteConfirm.
+  const getSiblingArrayYIndex = (
+    matrizClon: MacroProceso[],
+    type: CellData['type'],
+    path: number[]
+  ): { arr: any[]; index: number } | null => {
+    try {
+      switch (type) {
+        case 'macro':
+          return { arr: matrizClon, index: path[0] };
+        case 'proceso': {
+          const [mi] = path;
+          return { arr: matrizClon[mi].procesos, index: path[1] };
+        }
+        case 'subproceso': {
+          const [mi, pi] = path;
+          return { arr: matrizClon[mi].procesos[pi].subprocesos, index: path[2] };
+        }
+        case 'subprocesohijo': {
+          const [mi, pi, si] = path;
+          return { arr: matrizClon[mi].procesos[pi].subprocesos[si].subprocesos, index: path[3] };
+        }
+        case 'actividad': {
+          const [mi, pi, si, a, b] = path;
+          if (b !== undefined) {
+            // Actividad bajo un Subproceso Nivel 2 (subprocesohijo)
+            return { arr: (matrizClon[mi].procesos[pi].subprocesos[si] as any).subprocesos[a].actividades, index: b };
+          }
+          // Actividad directo bajo el Subproceso Nivel 1
+          return { arr: matrizClon[mi].procesos[pi].subprocesos[si].actividades, index: a };
+        }
+        default:
+          return null;
+      }
+    } catch {
+      return null;
+    }
+  };
+
+  const clavePath = (type: string, path: number[]) => `${type}:${path.join('-')}`;
+
+  // Mueve un puesto desde la actividad de origen hacia la actividad de
+  // destino (pueden estar en cualquier parte de la matriz, no necesitan
+  // compartir padre). Siempre opera sobre descripciones[0] de cada
+  // actividad -- si el destino no tiene ninguna descripción todavía, se
+  // crea una vacía para poder alojar el puesto.
+  const handleMoverPuesto = async (origenActividadPath: number[], destinoActividadPath: number[]) => {
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+
+      const obtenerActividad = (path: number[]): Actividad => {
+        if (path.length === 5) {
+          const [mi, pi, si, hi, ai] = path;
+          return (nuevaMatriz[mi].procesos[pi].subprocesos[si] as any).subprocesos[hi].actividades[ai];
+        }
+        const [mi, pi, si, ai] = path;
+        return nuevaMatriz[mi].procesos[pi].subprocesos[si].actividades[ai];
+      };
+
+      const actividadOrigen = obtenerActividad(origenActividadPath);
+      const actividadDestino = obtenerActividad(destinoActividadPath);
+
+      const puestoAMover = actividadOrigen?.descripciones?.[0]?.puestos?.[0];
+      if (!puestoAMover) {
+        showMessage('error', 'No se encontró el puesto de origen');
+        return;
+      }
+
+      actividadOrigen.descripciones[0].puestos = [];
+      if (!actividadDestino.descripciones || actividadDestino.descripciones.length === 0) {
+        actividadDestino.descripciones = [{ texto: '', puestos: [puestoAMover] }];
+      } else {
+        actividadDestino.descripciones[0].puestos = [puestoAMover];
+      }
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Puesto movido correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al mover el puesto');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // Mueve un Subproceso Nivel 2 hacia otro Subproceso Nivel 1 (puede ser el
+  // mismo -- para reordenar entre hermanos -- o uno distinto, incluyendo
+  // soltarlo sobre una zona vacía "Soltar aquí" para asignarlo ahí).
+  const handleMoverSubProcesoHijo = async (origenPath: number[], destinoPath: number[]) => {
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+      const obtenerArregloSubHijos = (path: number[]) => {
+        const [mi, pi, si] = path;
+        return nuevaMatriz[mi].procesos[pi].subprocesos[si].subprocesos;
+      };
+
+      const origenArr = obtenerArregloSubHijos(origenPath);
+      const origenIndex = origenPath[3];
+      const [elementoMovido] = origenArr.splice(origenIndex, 1);
+
+      const destinoArr = obtenerArregloSubHijos(destinoPath);
+      let destinoIndex: number;
+      if (destinoPath.length === 4) {
+        // Se soltó sobre otro Subproceso Nivel 2 existente -> insertar en esa posición
+        destinoIndex = destinoPath[3];
+        if (origenArr === destinoArr && origenIndex < destinoIndex) destinoIndex -= 1;
+      } else {
+        // Se soltó sobre la zona vacía "Soltar aquí" -> agregar al final
+        destinoIndex = destinoArr.length;
+      }
+      destinoArr.splice(destinoIndex, 0, elementoMovido);
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Subproceso Nivel 2 movido correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al mover el Subproceso Nivel 2');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // Mueve un Subproceso Nivel 1 hacia otro Proceso (puede ser el mismo --
+  // para reordenar entre hermanos -- o uno distinto, para reasignarlo,
+  // incluyendo soltarlo sobre un Proceso que se quedó sin ninguno).
+  const handleMoverSubProceso = async (origenPath: number[], destinoPath: number[]) => {
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+      const obtenerArregloSubprocesos = (path: number[]) => {
+        const [mi, pi] = path;
+        return nuevaMatriz[mi].procesos[pi].subprocesos;
+      };
+
+      const origenArr = obtenerArregloSubprocesos(origenPath);
+      const origenIndex = origenPath[2];
+      const [elementoMovido] = origenArr.splice(origenIndex, 1);
+
+      const destinoArr = obtenerArregloSubprocesos(destinoPath);
+      let destinoIndex: number;
+      if (destinoPath.length === 3) {
+        // Se soltó sobre otro Subproceso Nivel 1 existente -> insertar en esa posición
+        destinoIndex = destinoPath[2];
+        if (origenArr === destinoArr && origenIndex < destinoIndex) destinoIndex -= 1;
+      } else {
+        // Se soltó sobre la zona vacía "Soltar aquí" de un Proceso sin
+        // Subprocesos Nivel 1 todavía -> agregar al final
+        destinoIndex = destinoArr.length;
+      }
+      destinoArr.splice(destinoIndex, 0, elementoMovido);
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Subproceso Nivel 1 movido correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al mover el Subproceso Nivel 1');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // Mueve una Actividad hacia otro padre (otro Subproceso Nivel 1 u otro
+  // Subproceso Nivel 2 -- puede ser el mismo, para reordenar entre
+  // hermanos, o uno distinto, para reasignarla). Reutiliza
+  // getSiblingArrayYIndex, que ya sabe resolver ambas formas de path
+  // (actividad directa bajo Subproceso Nivel 1, o bajo Subproceso Nivel 2).
+  const handleMoverActividad = async (origenPath: number[], destinoPath: number[]) => {
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+
+      const origenInfo = getSiblingArrayYIndex(nuevaMatriz, 'actividad', origenPath);
+      if (!origenInfo) {
+        showMessage('error', 'No se encontró la actividad de origen');
+        return;
+      }
+      const [elementoMovido] = origenInfo.arr.splice(origenInfo.index, 1);
+
+      // destinoPath de 3 elementos = un Subproceso Nivel 1 sin NINGUNA
+      // actividad ni Subproceso Nivel 2 todavía -> se agrega directo a
+      // subproceso.actividades.
+      if (destinoPath.length === 3) {
+        const [mi, pi, si] = destinoPath;
+        nuevaMatriz[mi].procesos[pi].subprocesos[si].actividades.push(elementoMovido);
+      } else if (destinoPath.length === 5 && destinoPath[4] === -1) {
+        // destinoPath de 5 elementos terminando en -1 (centinela) = un
+        // Subproceso Nivel 2 sin ninguna actividad todavía -> se agrega
+        // directo a subprocesohijo.actividades. El -1 evita confundirlo
+        // con el path de una actividad real bajo ese mismo Subproceso
+        // Nivel 2 (que también tiene 5 elementos, pero con un índice >= 0).
+        const [mi, pi, si, hi] = destinoPath;
+        (nuevaMatriz[mi].procesos[pi].subprocesos[si] as any).subprocesos[hi].actividades.push(elementoMovido);
+      } else {
+        const destinoInfo = getSiblingArrayYIndex(nuevaMatriz, 'actividad', destinoPath);
+        if (!destinoInfo) {
+          showMessage('error', 'No se encontró el destino');
+          return;
+        }
+        let destinoIndex = destinoInfo.index;
+        if (origenInfo.arr === destinoInfo.arr && origenInfo.index < destinoIndex) destinoIndex -= 1;
+        destinoInfo.arr.splice(destinoIndex, 0, elementoMovido);
+      }
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Actividad movida correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al mover la actividad');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // Mueve una Descripción (junto con los Puestos que tenga adentro) desde
+  // su Actividad de origen hacia la Actividad de destino -- pueden ser
+  // actividades completamente distintas, en cualquier parte de la matriz.
+  const handleMoverDescripcion = async (origenPath: number[], destinoPath: number[]) => {
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+
+      const obtenerActividadObjeto = (path: number[]): Actividad => {
+        if (path.length === 5) {
+          const [mi, pi, si, hi, ai] = path;
+          return (nuevaMatriz[mi].procesos[pi].subprocesos[si] as any).subprocesos[hi].actividades[ai];
+        }
+        const [mi, pi, si, ai] = path;
+        return nuevaMatriz[mi].procesos[pi].subprocesos[si].actividades[ai];
+      };
+
+      const origenActividadPath = origenPath.slice(0, -1);
+      const origenDescIndex = origenPath[origenPath.length - 1];
+      const actividadOrigen = obtenerActividadObjeto(origenActividadPath);
+      const [elementoMovido] = actividadOrigen.descripciones.splice(origenDescIndex, 1);
+
+      const destinoEsPlaceholderVacio = destinoPath[destinoPath.length - 1] === -1;
+      const destinoActividadPath = destinoPath.slice(0, -1);
+      const actividadDestino = obtenerActividadObjeto(destinoActividadPath);
+
+      if (destinoEsPlaceholderVacio) {
+        // La actividad destino no tenía ninguna descripción todavía
+        actividadDestino.descripciones.push(elementoMovido);
+      } else {
+        const destinoDescIndex = destinoPath[destinoPath.length - 1];
+        let indiceDestinoAjustado = destinoDescIndex;
+        if (actividadOrigen.descripciones === actividadDestino.descripciones && origenDescIndex < destinoDescIndex) {
+          indiceDestinoAjustado -= 1;
+        }
+        actividadDestino.descripciones.splice(indiceDestinoAjustado, 0, elementoMovido);
+      }
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Descripción movida correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al mover la descripción');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  const handleDrop = async (targetType: CellData['type'], targetPath: number[]) => {
+    const origen = dragItem;
+    setDragItem(null);
+    setDragOverKey(null);
+    if (!origen || origen.type !== targetType) return; // solo se reordena entre elementos del mismo tipo
+    if (origen.path.join('-') === targetPath.join('-')) return; // soltó sobre sí mismo
+
+    if (origen.type === 'puesto') {
+      await handleMoverPuesto(origen.path, targetPath);
+      return;
+    }
+
+    if (origen.type === 'descripcion') {
+      await handleMoverDescripcion(origen.path, targetPath);
+      return;
+    }
+
+    if (origen.type === 'subprocesohijo') {
+      await handleMoverSubProcesoHijo(origen.path, targetPath);
+      return;
+    }
+
+    if (origen.type === 'subproceso') {
+      await handleMoverSubProceso(origen.path, targetPath);
+      return;
+    }
+
+    if (origen.type === 'actividad') {
+      await handleMoverActividad(origen.path, targetPath);
+      return;
+    }
+
+    try {
+      setIsReordering(true);
+      const nuevaMatriz = JSON.parse(JSON.stringify(matriz)) as MacroProceso[];
+      const origenInfo = getSiblingArrayYIndex(nuevaMatriz, origen.type, origen.path);
+      const destinoInfo = getSiblingArrayYIndex(nuevaMatriz, targetType, targetPath);
+      if (!origenInfo || !destinoInfo || origenInfo.arr !== destinoInfo.arr) {
+        // Solo permitimos reordenar dentro del mismo padre (mismos hermanos)
+        showMessage('error', 'Solo puedes reordenar elementos dentro del mismo grupo (mismo padre)');
+        return;
+      }
+      const [elementoMovido] = origenInfo.arr.splice(origenInfo.index, 1);
+      // Si el elemento movido estaba antes del destino, el índice destino ya
+      // se corrió una posición al hacer el splice de arriba.
+      const indiceDestinoAjustado =
+        origenInfo.index < destinoInfo.index ? destinoInfo.index - 1 : destinoInfo.index;
+      origenInfo.arr.splice(indiceDestinoAjustado, 0, elementoMovido);
+
+      await matrizProcesosService.updateMatriz(nuevaMatriz);
+      showMessage('success', 'Orden actualizado correctamente');
+      await refreshMatriz();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al reordenar');
+    } finally {
+      setIsReordering(false);
+    }
   };
 
   // Handle add element
@@ -833,8 +1283,8 @@ const MatrizProcesos: React.FC = () => {
   };
 
   // Handle edit puesto
-  const handleEditPuesto = (currentPuestoId: string | null, path: number[]) => {
-    setPuestoContext({ path, currentPuestoId, isEdit: true });
+  const handleEditPuesto = (currentPuestoId: string | null, path: number[], currentTrabajadorId?: string | number | null) => {
+    setPuestoContext({ path, currentPuestoId, currentTrabajadorId, isEdit: true });
     setIsPuestoDialogOpen(true);
   };
 
@@ -962,6 +1412,7 @@ const MatrizProcesos: React.FC = () => {
     path: number[],
     puestoId: string,
     puestoNombre: string,
+    trabajadorId: string | null,
     isEdit: boolean
   ) => {
     // Path: [macro, proceso, subproceso, subHijo, actividad, descripcion, puesto?]
@@ -1002,7 +1453,8 @@ const MatrizProcesos: React.FC = () => {
         .subprocesos[subHijoIndex].actividades[actividadIndex]
         .descripciones[descripcionIndex].puestos[puestoIndex] = {
           id: puestoId,
-          nombre: puestoNombre
+          nombre: puestoNombre,
+          trabajadorId
         };
       
       console.log('Puesto actualizado exitosamente en SubHijo');
@@ -1012,7 +1464,8 @@ const MatrizProcesos: React.FC = () => {
         .subprocesos[subHijoIndex].actividades[actividadIndex]
         .descripciones[descripcionIndex].puestos.push({
           id: puestoId,
-          nombre: puestoNombre
+          nombre: puestoNombre,
+          trabajadorId
         });
       
       console.log('Nuevo puesto agregado exitosamente en SubHijo');
@@ -1025,6 +1478,7 @@ const MatrizProcesos: React.FC = () => {
     path: number[],
     puestoId: string,
     puestoNombre: string,
+    trabajadorId: string | null,
     isEdit: boolean
   ) => {
     // Path: [macro, proceso, subproceso, actividad, descripcion, puesto?]
@@ -1065,7 +1519,8 @@ const MatrizProcesos: React.FC = () => {
         .actividades[actividadIndex].descripciones[descripcionIndex]
         .puestos[puestoIndex] = {
           id: puestoId,
-          nombre: puestoNombre
+          nombre: puestoNombre,
+          trabajadorId
         };
       
       console.log('Puesto actualizado exitosamente sin SubHijo');
@@ -1075,7 +1530,8 @@ const MatrizProcesos: React.FC = () => {
         .actividades[actividadIndex].descripciones[descripcionIndex]
         .puestos.push({
           id: puestoId,
-          nombre: puestoNombre
+          nombre: puestoNombre,
+          trabajadorId
         });
       
       console.log('Nuevo puesto agregado exitosamente sin SubHijo');
@@ -1083,7 +1539,7 @@ const MatrizProcesos: React.FC = () => {
   };
 
   // Handle puesto submit - Main function
-  const handlePuestoSubmit = async (puestoId: string, puestoNombre: string) => {
+  const handlePuestoSubmit = async (puestoId: string, puestoNombre: string, trabajadorId: string | null) => {
     if (!puestoContext) return;
 
     try {
@@ -1127,9 +1583,9 @@ const MatrizProcesos: React.FC = () => {
 
       // Llamar a la función correspondiente según la estructura
       if (hasSubHijo) {
-        await handlePuestoSubmitConSubHijo(newMatriz, path, puestoId, puestoNombre, isEdit || false);
+        await handlePuestoSubmitConSubHijo(newMatriz, path, puestoId, puestoNombre, trabajadorId, isEdit || false);
       } else {
-        await handlePuestoSubmitSinSubHijo(newMatriz, path, puestoId, puestoNombre, isEdit || false);
+        await handlePuestoSubmitSinSubHijo(newMatriz, path, puestoId, puestoNombre, trabajadorId, isEdit || false);
       }
 
       console.log('=== GUARDANDO CAMBIOS ===');
@@ -1414,17 +1870,65 @@ const MatrizProcesos: React.FC = () => {
                       <tr key={rowIndex} className="border-b hover:bg-muted/30 transition-colors">
                         {row.cells.map((cell, cellIndex) => {
                           if (cell === null) return null;
-                          
+
                           const isEmptyCell = cell.type === 'empty';
                           const isSubHijoColumn = cellIndex === 3;
-                          
+                          const esPuesto = cell.type === 'puesto';
+                          const tienePuestoReal = esPuesto && !!cell.nombre;
+                          const esSubHijoPlaceholder = cell.type === 'subprocesohijo' && !cell.nombre;
+                          const esSubProcesoPlaceholder = cell.type === 'subproceso' && !cell.nombre;
+                          const esActividadPlaceholder = cell.type === 'actividad' && !cell.nombre;
+                          const esDescripcionPlaceholder = cell.type === 'descripcion' && !cell.nombre;
+                          // Puesto: se puede soltar en CUALQUIER actividad (tenga puesto o no),
+                          // no solo entre hermanos del mismo padre -- por eso se trata aparte.
+                          const esArrastrable =
+                            canUpdate && (
+                              ['macro', 'proceso'].includes(cell.type) ||
+                              (cell.type === 'descripcion' && !esDescripcionPlaceholder) ||
+                              (cell.type === 'actividad' && !esActividadPlaceholder) ||
+                              (cell.type === 'subproceso' && !esSubProcesoPlaceholder) ||
+                              (cell.type === 'subprocesohijo' && !esSubHijoPlaceholder) ||
+                              tienePuestoReal
+                            );
+                          const esSoltable =
+                            canUpdate &&
+                            (['macro', 'proceso', 'subproceso', 'subprocesohijo', 'actividad', 'descripcion'].includes(cell.type) || esPuesto);
+                          const key = clavePath(cell.type, cell.path);
+                          const esDragOver = dragOverKey === key;
+
                           return (
                             <td
                               key={cellIndex}
                               rowSpan={cell.rowSpan}
+                              draggable={esArrastrable && !isReordering}
+                              onDragStart={(e) => {
+                                if (!esArrastrable) return;
+                                e.dataTransfer.effectAllowed = 'move';
+                                setDragItem({ type: cell.type, path: cell.path });
+                              }}
+                              onDragOver={(e) => {
+                                if (!esSoltable || !dragItem || dragItem.type !== cell.type) return;
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = 'move';
+                                if (dragOverKey !== key) setDragOverKey(key);
+                              }}
+                              onDragLeave={() => {
+                                if (dragOverKey === key) setDragOverKey(null);
+                              }}
+                              onDrop={(e) => {
+                                if (!esSoltable) return;
+                                e.preventDefault();
+                                handleDrop(cell.type, cell.path);
+                              }}
+                              onDragEnd={() => {
+                                setDragItem(null);
+                                setDragOverKey(null);
+                              }}
                               className={`p-3 align-top border-r last:border-r-0 ${
                                 isSubHijoColumn ? 'bg-muted/20' : ''
-                              } ${isEmptyCell ? 'bg-muted/10' : ''}`}
+                              } ${isEmptyCell ? 'bg-muted/10' : ''} ${esArrastrable ? 'cursor-grab active:cursor-grabbing' : ''} ${
+                                esDragOver ? 'ring-2 ring-inset ring-primary bg-primary/5' : ''
+                              }`}
                             >
                               {cell.content}
                             </td>
@@ -1466,6 +1970,7 @@ const MatrizProcesos: React.FC = () => {
         onOpenChange={setIsPuestoDialogOpen}
         onSubmit={handlePuestoSubmit}
         initialPuestoId={puestoContext?.currentPuestoId}
+        initialTrabajadorId={puestoContext?.currentTrabajadorId}
         isEdit={puestoContext?.isEdit}
       />
 

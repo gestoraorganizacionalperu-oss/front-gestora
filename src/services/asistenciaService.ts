@@ -15,6 +15,10 @@ export interface TrabajadorAsistencia {
   empresa_id?: string;
   hora_ingreso?: string;
   hora_salida?: string;
+  // ID real del Puesto (colección `puestos`, la misma que usa Matriz de
+  // Procesos). Antes de esto, el campo existía en la base de datos pero
+  // nunca se llenaba desde ninguna pantalla.
+  puesto?: string | null;
 }
 
 export type DiaSemanaHorario =
@@ -241,5 +245,16 @@ export const asistenciaService = {
       data
     );
     return response.data;
+  },
+
+  // El "id" aquí es el _id real de MongoDB del documento Trabajador (un
+  // entero simple en esta base de datos, ej. 2) -- NO el DNI. Es distinto
+  // al identificador que usa horario-trabajador (que sí usa el DNI).
+  async actualizarPuestoTrabajador(trabajadorMongoId: string, puestoId: string | null): Promise<TrabajadorAsistencia> {
+    const response = await httpClient.put<{ data: TrabajadorAsistencia }>(
+      `/api/asistencia/trabajadores/${trabajadorMongoId}/puesto`,
+      { puesto: puestoId || undefined }
+    );
+    return response.data.data;
   },
 };

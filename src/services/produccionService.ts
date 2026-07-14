@@ -6,11 +6,45 @@ import httpClient from './httpClient';
 // ============================================================
 
 export interface DiaProgramado {
-  hProg: string;
+  hProg: string; // horas programadas en decimal (ej. "4.5") -- se sigue
+  // guardando así para no romper los reportes/totales que ya suman este
+  // campo con Number(hProg). Se calcula automáticamente a partir de
+  // horaInicio/horaFin; ya no se escribe a mano.
   cantPro: string;
+  // Hora en que debería iniciar/terminar la actividad ese día ("HH:mm").
+  // A partir de estos dos, se calcula hProg automáticamente.
+  horaInicio?: string;
+  horaFin?: string;
   // Responsable asignado para ese día en particular. Reemplaza el antiguo
   // responsable único por actividad: ahora cada día puede tener alguien distinto.
   responsableId?: string;
+}
+
+// Calcula la cantidad de horas (en decimal, ej. "4.50") entre horaInicio y
+// horaFin ("HH:mm"). Si cruza medianoche (fin < inicio), asume que termina
+// al día siguiente. Devuelve '' si falta alguno de los dos.
+export function calcularHorasDecimal(horaInicio?: string, horaFin?: string): string {
+  if (!horaInicio || !horaFin) return '';
+  const [h1, m1] = horaInicio.split(':').map(Number);
+  const [h2, m2] = horaFin.split(':').map(Number);
+  if ([h1, m1, h2, m2].some((n) => Number.isNaN(n))) return '';
+  let minutos = (h2 * 60 + m2) - (h1 * 60 + m1);
+  if (minutos < 0) minutos += 24 * 60; // cruza medianoche
+  return (minutos / 60).toFixed(2);
+}
+
+// Convierte horas en decimal (ej. "4.5") a un texto legible tipo "4h 30min"
+// (ej. "5h", "30min", "4h 30min"), para mostrar en pantalla.
+// Devuelve '—' si no hay valor.
+export function formatoDecimalAHoraMin(decimalStr?: string): string {
+  const decimal = Number(decimalStr);
+  if (!decimalStr || Number.isNaN(decimal)) return '—';
+  const totalMin = Math.round(decimal * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}min`;
+  if (h > 0) return `${h}h`;
+  return `${m}min`;
 }
 
 export interface ActividadProduccion {
@@ -232,13 +266,19 @@ export interface FilaDetallada {
   procesoNombre: string;
   subprocesoNombre: string;
   actividadNombre: string;
+  horaInicioProg: string;
   horaInicioReal: string;
+  horaFinProg: string;
   horaFinReal: string;
   cantPro: string;
   cantReal: number;
   observaciones: string;
   responsableId: string;
   yaIniciado: boolean;
+  // Detalle de cada sesión individual del historial de hoy para esta
+  // actividad, ordenadas de la primera a la última -- para poder mostrar
+  // el desglose completo (no solo el acumulado) si se expande la fila.
+  sesiones: RegistroProduccion[];
 }
 
 export function construirReporteDetallada(
@@ -249,30 +289,47 @@ export function construirReporteDetallada(
   const hoyStr = new Date().toISOString().split('T')[0];
   const diaHoy = getDiaSemana(hoyStr);
 
-  const registroPorActividad = new Map<string, RegistroProduccion>();
+  // Agrupamos TODAS las sesiones de hoy por actividad (no solo la más
+  // reciente) para poder calcular: hora de inicio = la primera sesión del
+  // día, hora fin = la última, y cantidad real = la suma de todas.
+  const sesionesPorActividad = new Map<string, RegistroProduccion[]>();
   registrosHoy.forEach((r) => {
-    // Si hay varios registros de la misma actividad hoy, se usa el más reciente
-    const existente = registroPorActividad.get(r.actividadId);
-    if (!existente || r.updatedAt > existente.updatedAt) {
-      registroPorActividad.set(r.actividadId, r);
-    }
+    const lista = sesionesPorActividad.get(r.actividadId) || [];
+    lista.push(r);
+    sesionesPorActividad.set(r.actividadId, lista);
   });
 
   return config.actividades.map((a) => {
     const programado = diaHoy ? a[diaHoy] : undefined;
-    const registro = registroPorActividad.get(a.actividadId);
+    const sesiones = (sesionesPorActividad.get(a.actividadId) || [])
+      .slice()
+      .sort((x, y) => x.horaInicio.localeCompare(y.horaInicio));
+
+    const primeraSesion = sesiones[0];
+    const ultimaSesion = sesiones[sesiones.length - 1];
+    const cantRealAcumulada = sesiones.reduce((total, s) => total + (s.logrados || 0), 0);
+    // Observaciones: se concatenan todas las que tengan texto, separadas
+    // por " | ", para no perder ninguna sesión.
+    const observacionesAcumuladas = sesiones
+      .map((s) => s.observaciones)
+      .filter((o): o is string => !!o && o.trim().length > 0)
+      .join(' | ');
+
     return {
       actividadId: a.actividadId,
       procesoNombre: a.procesoNombre,
       subprocesoNombre: a.subprocesoNombre,
       actividadNombre: a.actividadNombre,
-      horaInicioReal: registro?.horaInicio || '',
-      horaFinReal: registro?.horaFin || '',
+      horaInicioProg: programado?.horaInicio || '',
+      horaInicioReal: primeraSesion?.horaInicio || '',
+      horaFinProg: programado?.horaFin || '',
+      horaFinReal: ultimaSesion?.horaFin || '',
       cantPro: programado?.cantPro || '',
-      cantReal: registro?.logrados || 0,
-      observaciones: registro?.observaciones || '',
+      cantReal: cantRealAcumulada,
+      observaciones: observacionesAcumuladas,
       responsableId: programado?.responsableId || '',
-      yaIniciado: !!registro,
+      yaIniciado: sesiones.length > 0,
+      sesiones,
     };
   });
 }
@@ -341,7 +398,11 @@ export function construirRendimientoPorResponsable(
 // ---- Matriz de Procesos (fuente maestra de actividades, no depende de config_ctrl_produccion) ----
 export interface PuestoRef {
   id: string;
-  nombre: string;
+  nombre?: string;
+  // ID real del Trabajador (colección `trabajador`) asignado a este Puesto
+  // para esta actividad en particular. Reemplaza la necesidad de "adivinar"
+  // por nombre -- viene directo de Matriz de Procesos.
+  trabajadorId?: string | number | null;
 }
 
 export interface DescripcionActividad {
@@ -383,6 +444,10 @@ export interface ActividadMaestra {
   subprocesoNombre: string;
   descripcionOriginal: string;
   puestoNombre: string;
+  // ID real del Trabajador asignado a esta actividad en Matriz de Procesos
+  // (ver PuestoRef.trabajadorId). Es el dato confiable para sugerir un
+  // responsable por defecto -- ya no hace falta adivinar por nombre.
+  trabajadorId?: string | number | null;
 }
 
 function aplanarSubprocesos(subprocesos: SubprocesoMatriz[], proceso: string, base = ''): ActividadMaestra[] {
@@ -398,6 +463,7 @@ function aplanarSubprocesos(subprocesos: SubprocesoMatriz[], proceso: string, ba
         subprocesoNombre: nombreSub,
         descripcionOriginal: desc?.texto || '',
         puestoNombre: desc?.puestos?.[0]?.nombre || '',
+        trabajadorId: desc?.puestos?.[0]?.trabajadorId ?? null,
       });
     }
     if (sub.subprocesos?.length) {

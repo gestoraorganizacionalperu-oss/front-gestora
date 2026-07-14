@@ -11,6 +11,7 @@ import {
   type HorarioTrabajador,
   type DiaSemanaHorario,
 } from '@/services/asistenciaService';
+import { puestosService, type Puesto } from '@/services/puestosService';
 
 const turnoDefecto = (entrada: string, salida: string) => ({ entrada, salida });
 
@@ -58,19 +59,38 @@ const MantenimientoAsistencias: React.FC = () => {
   const [isLoadingHorario, setIsLoadingHorario] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
+  const [puestos, setPuestos] = useState<Puesto[]>([]);
+  const [isLoadingPuestos, setIsLoadingPuestos] = useState(true);
+  const [puestoSeleccionadoId, setPuestoSeleccionadoId] = useState<string>('');
+
   const [toleranciaMinutos, setToleranciaMinutos] = useState('10');
   const [toleranciaMensualMax, setToleranciaMensualMax] = useState('120');
   const [horarios, setHorarios] = useState<HorarioTrabajador['horarios']>(horarioVacio());
 
   useEffect(() => {
     cargarTrabajadores();
+    cargarPuestos();
   }, []);
 
   useEffect(() => {
     if (trabajadorSeleccionadoId) {
       cargarHorario(trabajadorSeleccionadoId);
+      const trabajador = trabajadores.find((t) => t.nro_doc === trabajadorSeleccionadoId);
+      setPuestoSeleccionadoId(trabajador?.puesto || '');
     }
   }, [trabajadorSeleccionadoId]);
+
+  const cargarPuestos = async () => {
+    try {
+      setIsLoadingPuestos(true);
+      const data = await puestosService.getAllPuestos();
+      setPuestos(data);
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al cargar los puestos');
+    } finally {
+      setIsLoadingPuestos(false);
+    }
+  };
 
   const cargarTrabajadores = async () => {
     try {
@@ -128,18 +148,24 @@ const MantenimientoAsistencias: React.FC = () => {
   };
 
   const handleGuardar = async () => {
-    if (!trabajadorSeleccionadoId) return;
+    if (!trabajadorSeleccionadoId || !trabajadorSeleccionado) return;
     try {
       setGuardando(true);
-      await asistenciaService.guardarHorario({
-        trabajadorId: trabajadorSeleccionadoId,
-        horarios,
-        toleranciaMinutos: Number(toleranciaMinutos) || 0,
-        toleranciaMensualMax: Number(toleranciaMensualMax) || 0,
-      });
-      showMessage('success', 'Horario guardado correctamente');
+      await Promise.all([
+        asistenciaService.guardarHorario({
+          trabajadorId: trabajadorSeleccionadoId,
+          horarios,
+          toleranciaMinutos: Number(toleranciaMinutos) || 0,
+          toleranciaMensualMax: Number(toleranciaMensualMax) || 0,
+        }),
+        asistenciaService.actualizarPuestoTrabajador(trabajadorSeleccionado._id, puestoSeleccionadoId || null),
+      ]);
+      setTrabajadores((prev) =>
+        prev.map((t) => (t._id === trabajadorSeleccionado._id ? { ...t, puesto: puestoSeleccionadoId || null } : t))
+      );
+      showMessage('success', 'Cambios guardados correctamente');
     } catch (error: any) {
-      showMessage('error', error.message || 'Error al guardar el horario');
+      showMessage('error', error.message || 'Error al guardar los cambios');
     } finally {
       setGuardando(false);
     }
@@ -214,6 +240,31 @@ const MantenimientoAsistencias: React.FC = () => {
                     disabled={isLoadingHorario}
                   />
                 </div>
+              </div>
+
+              <div className="max-w-md space-y-2">
+                <Label>Puesto asignado</Label>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Este Puesto es el mismo que se usa en Matriz de Procesos — permite sugerir
+                  automáticamente al responsable correcto en Adm. Control de Producción.
+                </p>
+                <Select
+                  value={puestoSeleccionadoId || 'sin_asignar'}
+                  onValueChange={(v) => setPuestoSeleccionadoId(v === 'sin_asignar' ? '' : v)}
+                  disabled={isLoadingPuestos}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={isLoadingPuestos ? 'Cargando...' : 'Selecciona un puesto'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sin_asignar">Sin asignar</SelectItem>
+                    {puestos.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>
+                        {p.Nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="border rounded-lg overflow-x-auto">
