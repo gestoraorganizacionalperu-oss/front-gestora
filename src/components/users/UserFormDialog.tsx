@@ -38,6 +38,7 @@ const UserFormDialog: React.FC<UserFormDialogProps> = ({
     username: '',
     password: '',
     puestoId: '',
+    esTrabajador: false,
   });
 
   useEffect(() => {
@@ -55,6 +56,7 @@ const UserFormDialog: React.FC<UserFormDialogProps> = ({
           username: user.username || '',
           password: '',
           puestoId: user.puestoId || '',
+          esTrabajador: false,
         });
       } else {
         setFormData({
@@ -67,6 +69,7 @@ const UserFormDialog: React.FC<UserFormDialogProps> = ({
           username: '',
           password: '',
           puestoId: '',
+          esTrabajador: false,
         });
       }
     }
@@ -171,12 +174,24 @@ const UserFormDialog: React.FC<UserFormDialogProps> = ({
         payload.puestoId = formData.puestoId;
       }
 
+      // esTrabajador solo aplica al crear -- la homologación con
+      // `trabajador` todavía no está soportada al editar un usuario existente.
+      if (!user && formData.esTrabajador) {
+        payload.esTrabajador = true;
+      }
+
       if (user) {
         await usersService.updateUser(user.id, payload);
         showMessage('success', 'Usuario actualizado exitosamente');
       } else {
-        await usersService.createUser(payload);
-        showMessage('success', 'Usuario creado exitosamente');
+        const creado = await usersService.createUser(payload);
+        if (creado?.trabajadorVinculado?.creado) {
+          showMessage('success', 'Usuario creado, y se generó su ficha de trabajador para asistencia/producción.');
+        } else if (creado?.trabajadorVinculado && !creado.trabajadorVinculado.creado) {
+          showMessage('success', 'Usuario creado y vinculado a un trabajador existente con el mismo DNI.');
+        } else {
+          showMessage('success', 'Usuario creado exitosamente');
+        }
       }
 
       onSuccess();
@@ -316,6 +331,33 @@ const UserFormDialog: React.FC<UserFormDialogProps> = ({
               🔑 Gestionar credenciales de acceso
             </label>
           </div>
+
+          {/* También es trabajador de planta -- solo al crear. Vincula o
+              crea el registro en `trabajador` (asistencia, producción)
+              usando el mismo DNI, sin duplicar si ya existe uno. */}
+          {!user && (
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="esTrabajador"
+                  checked={formData.esTrabajador}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, esTrabajador: checked as boolean })
+                  }
+                  disabled={isSubmitting}
+                />
+                <label
+                  htmlFor="esTrabajador"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                >
+                  👷 Este usuario también es trabajador de planta
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground pl-6">
+                Aparecerá en Mantenimiento de Asistencias y Adm. Control de Producción, usando el mismo DNI.
+              </p>
+            </div>
+          )}
 
           {/* Campos de credenciales */}
           {formData.hasCredentials && (
