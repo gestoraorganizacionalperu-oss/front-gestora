@@ -17,6 +17,8 @@ export interface UserData {
   createdBy: string | null;
   updatedAt: string;
   updatedBy: string | null;
+  // Solo presente en la respuesta de creación, cuando se envió esTrabajador=true.
+  trabajadorVinculado?: { id: string | number; creado: boolean } | null;
 }
 
 export interface CreateUserDto {
@@ -29,6 +31,9 @@ export interface CreateUserDto {
   username?: string;
   password?: string;
   puestoId?: string; // Obligatorio solo cuando profileId === 3 (Responsable)
+  // Si es true, además de crear el Usuario se crea o vincula (por DNI) un
+  // registro en `trabajador`, para que aparezca en Asistencia/Producción.
+  esTrabajador?: boolean;
 }
 
 export interface UpdateUserDto {

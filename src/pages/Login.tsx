@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Mail, Lock, Loader2 } from 'lucide-react';
+import { User, Lock, Loader2 } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -71,13 +71,13 @@ const Login: React.FC = () => {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Correo Electrónico</Label>
+              <Label htmlFor="email">Correo o usuario</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="email"
-                  type="email"
-                  placeholder="correo@ejemplo.com"
+                  type="text"
+                  placeholder="correo@ejemplo.com o nombre de usuario"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-10"
