@@ -8,6 +8,8 @@ import {
   aplanarMatrizProcesos,
   calcularHorasDecimal,
   formatoDecimalAHoraMin,
+  calcularLunesDeSemana,
+  sumarSemanas,
   type ConfigCtrlProduccion,
   type ActividadProduccion,
   type DiaSemana,
@@ -114,16 +116,19 @@ const AdminControlProduccion: React.FC = () => {
   // el botón "Editar responsables".
   const [mostrarResponsables, setMostrarResponsables] = useState(false);
   const [busqueda, setBusqueda] = useState('');
+  // Semana que se está viendo/editando (Lunes de esa semana, "YYYY-MM-DD").
+  // Cada semana guarda su propia configuración por separado.
+  const [semanaInicio, setSemanaInicio] = useState(() => calcularLunesDeSemana(new Date().toISOString().split('T')[0]));
 
   useEffect(() => {
     cargarTodo();
-  }, []);
+  }, [semanaInicio]);
 
   const cargarTodo = async () => {
     try {
       setIsLoading(true);
       const [cfg, macroprocesos, trabs] = await Promise.all([
-        produccionService.getConfiguracion(),
+        produccionService.getConfiguracion(semanaInicio),
         produccionService.getMatrizProcesos(),
         produccionService.getTrabajadores(),
       ]);
@@ -309,6 +314,7 @@ const AdminControlProduccion: React.FC = () => {
     try {
       setGuardando(true);
       await produccionService.updateConfiguracion({
+        semanaInicio,
         actividades,
         proyectoOtro: config?.proyectoOtro,
       });
@@ -387,6 +393,33 @@ const AdminControlProduccion: React.FC = () => {
       })
     : actividades;
 
+  // Cambia de semana. delta=0 vuelve a la semana actual; delta=-1/1 mueve
+  // una semana atrás/adelante. Si hay cambios sin guardar, confirma antes
+  // de perder lo editado (cambiar de semana recarga los datos).
+  const cambiarSemana = (delta: number) => {
+    if (hayCambios) {
+      const continuar = window.confirm('Tienes cambios sin guardar en esta semana. Si cambias de semana, se van a perder. ¿Continuar de todas formas?');
+      if (!continuar) return;
+    }
+    if (delta === 0) {
+      setSemanaInicio(calcularLunesDeSemana(new Date().toISOString().split('T')[0]));
+    } else {
+      setSemanaInicio((actual) => sumarSemanas(actual, delta));
+    }
+    setHayCambios(false);
+  };
+
+  const finDeSemana = (lunes: string): string => {
+    const d = new Date(`${lunes}T00:00:00`);
+    d.setDate(d.getDate() + 5); // Lunes + 5 días = Sábado
+    return d.toISOString().split('T')[0];
+  };
+
+  const formatoFechaCorta = (fecha: string): string => {
+    const [, mes, dia] = fecha.split('-');
+    return `${dia}/${mes}`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -420,6 +453,35 @@ const AdminControlProduccion: React.FC = () => {
               {guardando ? 'Guardando...' : 'Guardar'}
             </Button>
           </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 border rounded-md px-2 py-1.5 bg-card">
+          <button
+            type="button"
+            onClick={() => cambiarSemana(-1)}
+            className="px-2 py-1 rounded hover:bg-muted text-sm"
+            title="Semana anterior"
+          >
+            ←
+          </button>
+          <span className="text-sm font-medium whitespace-nowrap px-2">
+            Semana del {formatoFechaCorta(semanaInicio)} al {formatoFechaCorta(finDeSemana(semanaInicio))}
+          </span>
+          <button
+            type="button"
+            onClick={() => cambiarSemana(1)}
+            className="px-2 py-1 rounded hover:bg-muted text-sm"
+            title="Semana siguiente"
+          >
+            →
+          </button>
+        </div>
+        {semanaInicio !== calcularLunesDeSemana(new Date().toISOString().split('T')[0]) && (
+          <Button variant="outline" size="sm" onClick={() => cambiarSemana(0)}>
+            Volver a esta semana
+          </Button>
         )}
       </div>
 

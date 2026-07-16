@@ -73,6 +73,9 @@ export interface ProyectoOtro {
 export interface ConfigCtrlProduccion {
   _id: string;
   companyId: string;
+  // Lunes de la semana que representa este documento ("YYYY-MM-DD"). Cada
+  // semana tiene su propio documento -- antes había uno solo por empresa.
+  semanaInicio?: string;
   actividades: ActividadProduccion[];
   proyectoOtro: ProyectoOtro;
   createdAt: string;
@@ -122,6 +125,25 @@ export function getDiaSemana(fecha: string): DiaSemana | null {
   return dias[d.getDay()];
 }
 
+// Calcula el Lunes de la semana a la que pertenece una fecha dada, en
+// formato "YYYY-MM-DD". Es el identificador que usa cada semana en
+// config_ctrl_produccion (cada semana tiene su propio documento guardado).
+export function calcularLunesDeSemana(fecha: string): string {
+  const d = new Date(`${fecha}T00:00:00`);
+  const diaSemana = d.getDay(); // 0=domingo, 1=lunes, ... 6=sábado
+  // Si es domingo (0), el lunes de "su" semana fue hace 6 días.
+  const diasDesdeElLunes = diaSemana === 0 ? 6 : diaSemana - 1;
+  d.setDate(d.getDate() - diasDesdeElLunes);
+  return d.toISOString().split('T')[0];
+}
+
+// Suma/resta semanas a una fecha "YYYY-MM-DD" (formato Lunes de semana).
+export function sumarSemanas(semanaInicio: string, cantidad: number): string {
+  const d = new Date(`${semanaInicio}T00:00:00`);
+  d.setDate(d.getDate() + cantidad * 7);
+  return d.toISOString().split('T')[0];
+}
+
 // Calcula la diferencia entre dos horas en formato "HH:MM:SS" y devuelve
 // el total en segundos y un texto legible ("12 min 45 seg", "1h 05min", etc.)
 export function calcularDuracion(horaInicio: string, horaFin: string): { segundos: number; texto: string } {
@@ -146,34 +168,47 @@ export function calcularDuracion(horaInicio: string, horaFin: string): { segundo
 // ese día (así coincide con el cálculo real visto en producción).
 export function calcularIndicadores(
   registros: RegistroProduccion[],
-  config: ConfigCtrlProduccion | null,
+  configsPorSemana: ConfigCtrlProduccion[],
   desde?: string,
-  hasta?: string
+  hasta?: string,
+  responsableIdFiltro?: string
 ): IndicadoresProduccion {
-  const totalActividades = registros.length;
-  const completadas = registros.filter((r) => r.estado === 'completado').length;
-  const enProgreso = registros.filter((r) => r.estado === 'en_progreso' || r.estado === 'pendiente').length;
-  const totalLogrados = registros.reduce((sum, r) => sum + (Number(r.logrados) || 0), 0);
-  const horasTrabajadasTotal = registros.reduce((sum, r) => sum + (Number(r.duracionMinutos) || 0), 0) / 60;
+  const registrosFiltrados = responsableIdFiltro
+    ? registros.filter((r) => r.responsableId === responsableIdFiltro)
+    : registros;
+
+  const totalActividades = registrosFiltrados.length;
+  const completadas = registrosFiltrados.filter((r) => r.estado === 'completado').length;
+  const enProgreso = registrosFiltrados.filter((r) => r.estado === 'en_progreso' || r.estado === 'pendiente').length;
+  const totalLogrados = registrosFiltrados.reduce((sum, r) => sum + (Number(r.logrados) || 0), 0);
+  const horasTrabajadasTotal = registrosFiltrados.reduce((sum, r) => sum + (Number(r.duracionMinutos) || 0), 0) / 60;
 
   let cantidadProgramadaTotal = 0;
   let horasProgramadasTotal = 0;
 
-  if (config && desde && hasta) {
+  if (configsPorSemana && configsPorSemana.length > 0 && desde && hasta) {
+    const configPorSemana = new Map<string, ConfigCtrlProduccion>();
+    configsPorSemana.forEach((c) => {
+      if (c.semanaInicio) configPorSemana.set(c.semanaInicio, c);
+    });
+
     const fechaInicio = new Date(`${desde}T00:00:00`);
     const fechaFin = new Date(`${hasta}T00:00:00`);
     for (let d = new Date(fechaInicio); d <= fechaFin; d.setDate(d.getDate() + 1)) {
-      const dia = getDiaSemana(d.toISOString().split('T')[0]);
+      const fechaStr = d.toISOString().split('T')[0];
+      const dia = getDiaSemana(fechaStr);
       if (!dia) continue; // domingo, sin programación
-      config.actividades.forEach((actividad) => {
+      const configDeEstaSemana = configPorSemana.get(calcularLunesDeSemana(fechaStr));
+      if (!configDeEstaSemana) continue;
+      configDeEstaSemana.actividades.forEach((actividad) => {
         const programado = actividad[dia];
+        if (responsableIdFiltro && (programado?.responsableId || '') !== responsableIdFiltro) return;
         if (programado?.cantPro || programado?.hProg) {
           cantidadProgramadaTotal += Number(programado.cantPro) || 0;
           horasProgramadasTotal += Number(programado.hProg) || 0;
         }
       });
     }
-    console.log(`✅ Total programado en el rango ${desde} a ${hasta}: cantidad=${cantidadProgramadaTotal} horas=${horasProgramadasTotal}`);
   }
 
   const cumplimientoProduccion =
@@ -224,10 +259,11 @@ function formatoHoraMin(minutos: number): string {
 
 export function construirReporteResumida(
   config: ConfigCtrlProduccion | null,
-  registrosHoy: RegistroProduccion[]
+  registrosHoy: RegistroProduccion[],
+  fecha?: string
 ): FilaResumida[] {
   if (!config) return [];
-  const hoyStr = new Date().toISOString().split('T')[0];
+  const hoyStr = fecha || new Date().toISOString().split('T')[0];
   const diaHoy = getDiaSemana(hoyStr);
 
   const registrosPorActividad = new Map<string, RegistroProduccion[]>();
@@ -283,10 +319,11 @@ export interface FilaDetallada {
 
 export function construirReporteDetallada(
   config: ConfigCtrlProduccion | null,
-  registrosHoy: RegistroProduccion[]
+  registrosHoy: RegistroProduccion[],
+  fecha?: string
 ): FilaDetallada[] {
   if (!config) return [];
-  const hoyStr = new Date().toISOString().split('T')[0];
+  const hoyStr = fecha || new Date().toISOString().split('T')[0];
   const diaHoy = getDiaSemana(hoyStr);
 
   // Agrupamos TODAS las sesiones de hoy por actividad (no solo la más
@@ -345,22 +382,33 @@ export interface FilaResponsable {
 }
 
 export function construirRendimientoPorResponsable(
-  config: ConfigCtrlProduccion | null,
+  configsPorSemana: ConfigCtrlProduccion[],
   registrosRango: RegistroProduccion[],
   desde: string,
   hasta: string
 ): FilaResponsable[] {
-  if (!config) return [];
+  if (!configsPorSemana || configsPorSemana.length === 0) return [];
+
+  // Mapa: semanaInicio ("YYYY-MM-DD" del Lunes) -> su documento de config.
+  const configPorSemana = new Map<string, ConfigCtrlProduccion>();
+  configsPorSemana.forEach((c) => {
+    if (c.semanaInicio) configPorSemana.set(c.semanaInicio, c);
+  });
 
   // Cantidad programada por responsable: recorre cada día del rango y suma
-  // el cantPro de cada actividad asignada a ese responsable.
+  // el cantPro de cada actividad asignada a ese responsable ESE día,
+  // usando la configuración de la semana a la que pertenece ese día
+  // específico (no siempre la misma).
   const programadoPorResponsable = new Map<string, number>();
   const fechaInicio = new Date(`${desde}T00:00:00`);
   const fechaFin = new Date(`${hasta}T00:00:00`);
   for (let d = new Date(fechaInicio); d <= fechaFin; d.setDate(d.getDate() + 1)) {
-    const dia = getDiaSemana(d.toISOString().split('T')[0]);
+    const fechaStr = d.toISOString().split('T')[0];
+    const dia = getDiaSemana(fechaStr);
     if (!dia) continue;
-    config.actividades.forEach((a) => {
+    const configDeEstaSemana = configPorSemana.get(calcularLunesDeSemana(fechaStr));
+    if (!configDeEstaSemana) continue;
+    configDeEstaSemana.actividades.forEach((a) => {
       const programado = a[dia];
       if (programado?.cantPro) {
         const respId = programado?.responsableId || '';
@@ -507,8 +555,8 @@ export const produccionService = {
   // ---- Configuración (Administración Control de Producción) ----
   // Devuelve el documento único de configuración de la empresa (con su
   // array interno "actividades"), no una lista de configuraciones.
-  async getConfiguracion(): Promise<ConfigCtrlProduccion | null> {
-    const response = await httpClient.get<any>('/api/config_ctrl_produccion');
+  async getConfiguracion(semanaInicio: string): Promise<ConfigCtrlProduccion | null> {
+    const response = await httpClient.get<any>('/api/config_ctrl_produccion', { params: { semanaInicio } });
     const data = response.data;
     if (data && typeof data === 'object' && !Array.isArray(data)) return data;
     // Por si en algún momento el backend devuelve un array con un solo doc
@@ -516,7 +564,14 @@ export const produccionService = {
     return null;
   },
 
-  async updateConfiguracion(data: Partial<ConfigCtrlProduccion>): Promise<ConfigCtrlProduccion> {
+  // Trae los documentos de TODAS las semanas que se superponen con el rango
+  // [desde, hasta] -- para reportes que abarcan varias semanas.
+  async getConfiguracionesRango(desde: string, hasta: string): Promise<ConfigCtrlProduccion[]> {
+    const response = await httpClient.get<any>('/api/config_ctrl_produccion/rango', { params: { desde, hasta } });
+    return extractArray<ConfigCtrlProduccion>(response.data, ['data', 'items']);
+  },
+
+  async updateConfiguracion(data: Partial<ConfigCtrlProduccion> & { semanaInicio: string }): Promise<ConfigCtrlProduccion> {
     const response = await httpClient.put<ConfigCtrlProduccion>('/api/config_ctrl_produccion', data);
     return response.data;
   },
