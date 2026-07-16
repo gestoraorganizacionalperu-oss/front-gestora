@@ -8,6 +8,7 @@ import {
   construirReporteResumida,
   construirReporteDetallada,
   construirRendimientoPorResponsable,
+  calcularLunesDeSemana,
   type IndicadoresProduccion,
   type ConfigCtrlProduccion,
   type FilaResumida,
@@ -20,13 +21,6 @@ const hoy = new Date();
 const primerDiaDelMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
 
 const toInputDate = (d: Date) => d.toISOString().split('T')[0];
-
-const fechaLarga = new Intl.DateTimeFormat('es-PE', {
-  weekday: 'long',
-  day: '2-digit',
-  month: 'long',
-  year: 'numeric',
-}).format(hoy);
 
 const INDICADORES_VACIOS: IndicadoresProduccion = {
   totalActividades: 0,
@@ -89,12 +83,19 @@ const ReportesProduccion: React.FC = () => {
   const { showMessage } = useMessage();
   const [isLoading, setIsLoading] = useState(true);
   const [config, setConfig] = useState<ConfigCtrlProduccion | null>(null);
+  // Documentos de configuración de CADA semana que se superpone con el
+  // rango de fechas filtrado -- necesario porque cada semana ahora guarda
+  // su propia configuración por separado, no una sola que se repite.
+  const [configsRango, setConfigsRango] = useState<ConfigCtrlProduccion[]>([]);
   const [desde, setDesde] = useState(toInputDate(primerDiaDelMes));
   const [hasta, setHasta] = useState(toInputDate(hoy));
   const [indicadores, setIndicadores] = useState<IndicadoresProduccion>(INDICADORES_VACIOS);
 
-  // Tarjetas superiores: SIEMPRE reflejan el día de HOY, independiente
-  // del filtro de fechas de la sección "Indicadores de Producción".
+  // Fecha que controla las 4 tarjetas superiores y los reportes Resumida/
+  // Detallada -- antes estaba fija a "hoy", ahora se puede elegir.
+  const [fechaSeleccionada, setFechaSeleccionada] = useState(toInputDate(hoy));
+
+  // Tarjetas superiores: reflejan la fecha seleccionada (por defecto, hoy).
   const [totalActividadesHoy, setTotalActividadesHoy] = useState(0);
   const [completadasHoy, setCompletadasHoy] = useState(0);
   const [enProgresoHoy, setEnProgresoHoy] = useState(0);
@@ -103,9 +104,16 @@ const ReportesProduccion: React.FC = () => {
   const [registrosHoyCompletos, setRegistrosHoyCompletos] = useState<any[]>([]);
   const [registrosRangoCompletos, setRegistrosRangoCompletos] = useState<any[]>([]);
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  // Filtra la sección "Indicadores de Producción" (KPIs + tabla de
+  // Rendimiento por Responsable) a un solo trabajador. '' = todos.
+  const [trabajadorFiltro, setTrabajadorFiltro] = useState('');
   // Actividades cuya fila está expandida, mostrando el detalle de cada
   // sesión individual del historial de hoy (no solo el acumulado).
   const [filasExpandidas, setFilasExpandidas] = useState<Set<string>>(new Set());
+  // Distingue "todavía está cargando" de "ya cargó, pero no hay nada
+  // guardado para esta fecha" -- antes ambos casos mostraban el mismo
+  // mensaje de "Cargando actividades..." para siempre.
+  const [cargandoSnapshot, setCargandoSnapshot] = useState(true);
 
   // Carga la lista de trabajadores una sola vez (para mostrar nombres reales)
   useEffect(() => {
@@ -114,19 +122,20 @@ const ReportesProduccion: React.FC = () => {
     });
   }, []);
 
-  // Carga la configuración (metas programadas) una sola vez
+  // Carga la configuración (metas programadas) de la fecha seleccionada
   useEffect(() => {
-    produccionService.getConfiguracion().then(setConfig).catch(() => {
+    produccionService.getConfiguracion(calcularLunesDeSemana(fechaSeleccionada)).then(setConfig).catch(() => {
       showMessage('error', 'No se pudo cargar la configuración de metas de producción');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fechaSeleccionada]);
 
-  // Carga el snapshot de HOY, una sola vez (no depende del filtro de fechas)
+  // Carga el snapshot de la fecha seleccionada (tarjetas superiores +
+  // reportes Resumida/Detallada)
   useEffect(() => {
-    const hoyStr = toInputDate(hoy);
+    setCargandoSnapshot(true);
     produccionService
-      .getRegistrosPorFecha(hoyStr)
+      .getRegistrosPorFecha(fechaSeleccionada)
       .then((registrosHoy) => {
         setRegistrosHoyCompletos(registrosHoy);
         setTotalActividadesHoy(config?.actividades.length || registrosHoy.length);
@@ -136,21 +145,26 @@ const ReportesProduccion: React.FC = () => {
       })
       .catch(() => {
         // Si falla, dejamos las tarjetas en 0 en vez de romper la página
-      });
+      })
+      .finally(() => setCargandoSnapshot(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+  }, [config, fechaSeleccionada]);
 
   useEffect(() => {
     loadReporte();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desde, hasta, config]);
+  }, [desde, hasta, trabajadorFiltro]);
 
   const loadReporte = async () => {
     try {
       setIsLoading(true);
-      const registros = await produccionService.getRegistrosPorRango(desde, hasta);
+      const [registros, configs] = await Promise.all([
+        produccionService.getRegistrosPorRango(desde, hasta),
+        produccionService.getConfiguracionesRango(desde, hasta),
+      ]);
       setRegistrosRangoCompletos(registros);
-      const calculados = calcularIndicadores(registros, config, desde, hasta);
+      setConfigsRango(configs);
+      const calculados = calcularIndicadores(registros, configs, desde, hasta, trabajadorFiltro || undefined);
       setIndicadores(calculados);
     } catch (error: any) {
       setIndicadores(INDICADORES_VACIOS);
@@ -160,14 +174,19 @@ const ReportesProduccion: React.FC = () => {
     }
   };
 
-  const filasResumida: FilaResumida[] = construirReporteResumida(config, registrosHoyCompletos);
-  const filasDetallada: FilaDetallada[] = construirReporteDetallada(config, registrosHoyCompletos);
-  const filasResponsable: FilaResponsable[] = construirRendimientoPorResponsable(
-    config,
+  const filasResumida: FilaResumida[] = construirReporteResumida(config, registrosHoyCompletos, fechaSeleccionada);
+  const filasDetallada: FilaDetallada[] = construirReporteDetallada(config, registrosHoyCompletos, fechaSeleccionada);
+  const filasResponsableTodas: FilaResponsable[] = construirRendimientoPorResponsable(
+    configsRango,
     registrosRangoCompletos,
     desde,
     hasta
   );
+  // La tabla "Rendimiento y Cumplimiento por Responsable" respeta el mismo
+  // filtro de trabajador que los KPIs de arriba.
+  const filasResponsable: FilaResponsable[] = trabajadorFiltro
+    ? filasResponsableTodas.filter((f) => f.responsableId === trabajadorFiltro)
+    : filasResponsableTodas;
   const nombrePorId = new Map(trabajadores.map((t) => [String(t._id), t.nombres]));
   const nombreResponsable = (id: string) => nombrePorId.get(id) || `Responsable ${id}`;
   const filasResumidaAgrupadas = conRowSpans(filasResumida);
@@ -213,11 +232,32 @@ const ReportesProduccion: React.FC = () => {
     },
   ];
 
+  const fechaLargaSeleccionada = new Intl.DateTimeFormat('es-PE', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(`${fechaSeleccionada}T00:00:00`));
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Reportes de Producción</h1>
-        <p className="text-muted-foreground mt-1 capitalize">{fechaLarga}</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Reportes de Producción</h1>
+          <p className="text-muted-foreground mt-1 capitalize">{fechaLargaSeleccionada}</p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="fecha-reportes" className="text-xs text-muted-foreground">
+            Fecha de los reportes
+          </Label>
+          <input
+            id="fecha-reportes"
+            type="date"
+            value={fechaSeleccionada}
+            onChange={(e) => setFechaSeleccionada(e.target.value)}
+            className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -236,7 +276,7 @@ const ReportesProduccion: React.FC = () => {
         <div className="bg-primary text-primary-foreground px-4 py-2 font-semibold text-sm">
           INDICADORES DE PRODUCCIÓN
         </div>
-        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label htmlFor="desde">Desde</Label>
             <input
@@ -256,6 +296,22 @@ const ReportesProduccion: React.FC = () => {
               onChange={(e) => setHasta(e.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="trabajador-filtro">Trabajador</Label>
+            <select
+              id="trabajador-filtro"
+              value={trabajadorFiltro}
+              onChange={(e) => setTrabajadorFiltro(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Todos los trabajadores</option>
+              {trabajadores.map((t) => (
+                <option key={t._id} value={String(t._id)}>
+                  {t.nombres}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -316,7 +372,7 @@ const ReportesProduccion: React.FC = () => {
       <div className="border rounded-lg bg-card overflow-hidden">
         <div className="bg-primary text-primary-foreground px-4 py-2 font-semibold text-sm flex justify-between">
           <span>REPORTE DE PRODUCCIÓN RESUMIDA</span>
-          <span className="capitalize font-normal">{fechaLarga}</span>
+          <span className="capitalize font-normal">{fechaLargaSeleccionada}</span>
         </div>
         <table className="w-full table-auto border-collapse">
           <thead>
@@ -335,7 +391,9 @@ const ReportesProduccion: React.FC = () => {
             {filasResumidaAgrupadas.length === 0 ? (
               <tr>
                 <td colSpan={8} className={`${celdaEstilo} text-center text-muted-foreground py-4`}>
-                  Cargando actividades...
+                  {cargandoSnapshot
+                    ? 'Cargando actividades...'
+                    : 'No hay actividades programadas para esta fecha (la semana a la que pertenece todavía no tiene una configuración guardada en Adm. Control de Producción)'}
                 </td>
               </tr>
             ) : (
@@ -372,7 +430,7 @@ const ReportesProduccion: React.FC = () => {
       <div className="border rounded-lg bg-card overflow-hidden">
         <div className="bg-primary text-primary-foreground px-4 py-2 font-semibold text-sm flex justify-between">
           <span>REPORTE DE PRODUCCIÓN DETALLADA</span>
-          <span className="capitalize font-normal">{fechaLarga}</span>
+          <span className="capitalize font-normal">{fechaLargaSeleccionada}</span>
         </div>
         <table className="w-full table-auto border-collapse">
           <thead>
@@ -394,7 +452,9 @@ const ReportesProduccion: React.FC = () => {
             {filasDetalladaAgrupadas.length === 0 ? (
               <tr>
                 <td colSpan={11} className={`${celdaEstilo} text-center text-muted-foreground py-4`}>
-                  Cargando actividades...
+                  {cargandoSnapshot
+                    ? 'Cargando actividades...'
+                    : 'No hay actividades programadas para esta fecha (la semana a la que pertenece todavía no tiene una configuración guardada en Adm. Control de Producción)'}
                 </td>
               </tr>
             ) : (

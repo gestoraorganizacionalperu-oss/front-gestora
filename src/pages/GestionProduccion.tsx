@@ -8,6 +8,7 @@ import {
   produccionService,
   getDiaSemana,
   calcularDuracion,
+  calcularLunesDeSemana,
   type ConfigCtrlProduccion,
   type RegistroProduccion,
   type Trabajador,
@@ -59,7 +60,7 @@ const GestionProduccion: React.FC = () => {
     try {
       setIsLoading(true);
       const [cfg, regs, trabs] = await Promise.all([
-        produccionService.getConfiguracion(),
+        produccionService.getConfiguracion(calcularLunesDeSemana(hoyStr)),
         produccionService.getRegistrosPorFecha(hoyStr),
         produccionService.getTrabajadores(),
       ]);
