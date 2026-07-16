@@ -16,17 +16,23 @@ import {
   type Trabajador,
 } from '@/services/produccionService';
 
-const DIAS: { key: DiaSemana; label: string }[] = [
-  { key: 'lunes', label: 'Lunes' },
-  { key: 'martes', label: 'Martes' },
-  { key: 'miercoles', label: 'Miércoles' },
-  { key: 'jueves', label: 'Jueves' },
-  { key: 'viernes', label: 'Viernes' },
-  { key: 'sabado', label: 'Sábado' },
+const DIAS: {
+  key: DiaSemana;
+  label: string;
+  headerBg: string; // fondo del encabezado (más saturado)
+  cellBg: string; // fondo de las celdas de datos (más sutil)
+  text: string; // color de texto del encabezado, mismo tono oscuro que el fondo
+}[] = [
+  { key: 'lunes', label: 'Lunes', headerBg: 'bg-teal-100 dark:bg-teal-950', cellBg: 'bg-teal-50/70 dark:bg-teal-950/30', text: 'text-teal-900 dark:text-teal-200' },
+  { key: 'martes', label: 'Martes', headerBg: 'bg-orange-100 dark:bg-orange-950', cellBg: 'bg-orange-50/70 dark:bg-orange-950/30', text: 'text-orange-900 dark:text-orange-200' },
+  { key: 'miercoles', label: 'Miércoles', headerBg: 'bg-amber-100 dark:bg-amber-950', cellBg: 'bg-amber-50/70 dark:bg-amber-950/30', text: 'text-amber-900 dark:text-amber-200' },
+  { key: 'jueves', label: 'Jueves', headerBg: 'bg-blue-100 dark:bg-blue-950', cellBg: 'bg-blue-50/70 dark:bg-blue-950/30', text: 'text-blue-900 dark:text-blue-200' },
+  { key: 'viernes', label: 'Viernes', headerBg: 'bg-violet-100 dark:bg-violet-950', cellBg: 'bg-violet-50/70 dark:bg-violet-950/30', text: 'text-violet-900 dark:text-violet-200' },
+  { key: 'sabado', label: 'Sábado', headerBg: 'bg-pink-100 dark:bg-pink-950', cellBg: 'bg-pink-50/70 dark:bg-pink-950/30', text: 'text-pink-900 dark:text-pink-200' },
 ];
 
 const celdaEstilo = 'border border-border px-1 py-1 text-xs';
-const celdaHeaderEstilo = 'border border-border px-2 py-1.5 text-xs font-semibold text-primary uppercase whitespace-nowrap';
+const celdaHeaderEstilo = 'border border-border px-2 py-1.5 text-xs font-semibold uppercase whitespace-nowrap';
 
 const CampoNumero: React.FC<{
   valor: string;
@@ -497,21 +503,27 @@ const AdminControlProduccion: React.FC = () => {
         <table className="w-full table-auto border-collapse">
           <thead>
             <tr>
-              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Proceso</th>
-              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Subproceso</th>
-              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Actividades</th>
+              <th className={`${celdaHeaderEstilo} text-primary text-left`} rowSpan={2}>Proceso</th>
+              <th className={`${celdaHeaderEstilo} text-primary text-left`} rowSpan={2}>Subproceso</th>
+              <th className={`${celdaHeaderEstilo} text-primary text-left`} rowSpan={2}>Actividades</th>
               {DIAS.map((d) => (
-                <th key={d.key} className={`${celdaHeaderEstilo} text-center`} colSpan={mostrarResponsables ? 5 : 4}>{d.label}</th>
+                <th
+                  key={d.key}
+                  className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}
+                  colSpan={mostrarResponsables ? 5 : 4}
+                >
+                  {d.label}
+                </th>
               ))}
             </tr>
             <tr>
               {DIAS.map((d) => (
                 <React.Fragment key={d.key}>
-                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Inicio</th>
-                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Fin</th>
-                  <th className={`${celdaHeaderEstilo} text-center`}>H.Prog</th>
-                  <th className={`${celdaHeaderEstilo} text-center`}>Cant.Pro</th>
-                  {mostrarResponsables && <th className={`${celdaHeaderEstilo} text-center`}>Resp.</th>}
+                  <th className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}>Hora Inicio</th>
+                  <th className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}>Hora Fin</th>
+                  <th className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}>H.Prog</th>
+                  <th className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}>Cant.Pro</th>
+                  {mostrarResponsables && <th className={`${celdaHeaderEstilo} ${d.headerBg} ${d.text} text-center`}>Resp.</th>}
                 </React.Fragment>
               ))}
             </tr>
@@ -539,7 +551,7 @@ const AdminControlProduccion: React.FC = () => {
                   <td className={`${celdaEstilo} font-medium`}>{act.actividadNombre}</td>
                   {DIAS.map((d) => (
                     <React.Fragment key={d.key}>
-                      <td className={celdaEstilo}>
+                      <td className={`${celdaEstilo} ${d.cellBg}`}>
                         <input
                           type="time"
                           value={act[d.key]?.horaInicio || ''}
@@ -548,7 +560,7 @@ const AdminControlProduccion: React.FC = () => {
                           className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </td>
-                      <td className={celdaEstilo}>
+                      <td className={`${celdaEstilo} ${d.cellBg}`}>
                         <input
                           type="time"
                           value={act[d.key]?.horaFin || ''}
@@ -557,10 +569,10 @@ const AdminControlProduccion: React.FC = () => {
                           className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </td>
-                      <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                      <td className={`${celdaEstilo} ${d.cellBg} text-center font-medium text-muted-foreground`}>
                         {formatoDecimalAHoraMin(act[d.key]?.hProg)}
                       </td>
-                      <td className={celdaEstilo}>
+                      <td className={`${celdaEstilo} ${d.cellBg}`}>
                         <CampoNumero
                           valor={act[d.key]?.cantPro || ''}
                           onChange={(v) => actualizarCelda(act.actividadId, d.key, 'cantPro', v)}
@@ -569,7 +581,7 @@ const AdminControlProduccion: React.FC = () => {
                         />
                       </td>
                       {mostrarResponsables && (
-                        <td className={celdaEstilo}>
+                        <td className={`${celdaEstilo} ${d.cellBg}`}>
                           <SelectorResponsable
                             valor={act[d.key]?.responsableId || ''}
                             onChange={(v) => actualizarResponsableDia(act.actividadId, d.key, v)}
@@ -603,7 +615,7 @@ const AdminControlProduccion: React.FC = () => {
                 </td>
                 {DIAS.map((d) => (
                   <React.Fragment key={d.key}>
-                    <td className={celdaEstilo}>
+                    <td className={`${celdaEstilo} ${d.cellBg}`}>
                       <input
                         type="time"
                         value={config.proyectoOtro?.[d.key]?.horaInicio || ''}
@@ -612,7 +624,7 @@ const AdminControlProduccion: React.FC = () => {
                         className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                       />
                     </td>
-                    <td className={celdaEstilo}>
+                    <td className={`${celdaEstilo} ${d.cellBg}`}>
                       <input
                         type="time"
                         value={config.proyectoOtro?.[d.key]?.horaFin || ''}
@@ -621,10 +633,10 @@ const AdminControlProduccion: React.FC = () => {
                         className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                       />
                     </td>
-                    <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                    <td className={`${celdaEstilo} ${d.cellBg} text-center font-medium text-muted-foreground`}>
                       {formatoDecimalAHoraMin(config.proyectoOtro?.[d.key]?.hProg)}
                     </td>
-                    <td className={celdaEstilo}>
+                    <td className={`${celdaEstilo} ${d.cellBg}`}>
                       <CampoNumero
                         valor={config.proyectoOtro?.[d.key]?.cantPro || ''}
                         onChange={(v) => actualizarCampoProyectoOtro(d.key, 'cantPro', v)}
@@ -633,7 +645,7 @@ const AdminControlProduccion: React.FC = () => {
                       />
                     </td>
                     {mostrarResponsables && (
-                      <td className={celdaEstilo}>
+                      <td className={`${celdaEstilo} ${d.cellBg}`}>
                         <SelectorResponsable
                           valor={config.proyectoOtro?.[d.key]?.responsableId || ''}
                           onChange={(v) => actualizarResponsableDiaProyectoOtro(d.key, v)}
