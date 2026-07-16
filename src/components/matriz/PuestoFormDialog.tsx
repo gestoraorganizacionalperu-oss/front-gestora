@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { matrizProcesosService, type Cargo, type PuestoCargo } from '@/services/matrizProcesosService';
+import { asistenciaService, type TrabajadorAsistencia } from '@/services/asistenciaService';
+import { puestosService } from '@/services/puestosService';
 import { useMessage } from '@/contexts/MessageContext';
 
 interface PuestoFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (puestoId: string, puestoNombre: string) => void;
+  onSubmit: (puestoId: string, puestoNombre: string, trabajadorId: string | null) => void;
   initialPuestoId?: string | null;
+  initialTrabajadorId?: string | number | null;
   isEdit?: boolean;
 }
 
@@ -19,6 +22,7 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
   onOpenChange,
   onSubmit,
   initialPuestoId,
+  initialTrabajadorId,
   isEdit = false,
 }) => {
   const { showMessage } = useMessage();
@@ -30,19 +34,35 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
   const [isLoadingPuestos, setIsLoadingPuestos] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // Atajo: elegir directamente a la persona (Trabajador) en vez de navegar
+  // Cargo -> Puesto manualmente. Al elegir, se autocompletan Cargo y Puesto
+  // usando el vínculo configurado en Mantenimiento de Asistencias.
+  const [trabajadores, setTrabajadores] = useState<TrabajadorAsistencia[]>([]);
+  const [selectedTrabajadorId, setSelectedTrabajadorId] = useState<string>('');
+  const [isLoadingTrabajadores, setIsLoadingTrabajadores] = useState(false);
+  const omitirResetPuesto = useRef(false);
+
   useEffect(() => {
     if (open) {
       loadCargos();
+      loadTrabajadores();
       setIsInitialized(false);
-      if (!isEdit) {
-        setSelectedCargoId('');
-        setSelectedPuestoId('');
-        setPuestos([]);
-      }
+      // Reiniciamos SIEMPRE (edición o no) para no arrastrar la selección
+      // de una edición anterior. Si es edición, initializeEditMode se
+      // encarga de volver a completar Cargo/Puesto/Trabajador correctos
+      // para esta actividad específica.
+      setSelectedCargoId('');
+      setSelectedPuestoId('');
+      setSelectedTrabajadorId('');
+      setPuestos([]);
     }
   }, [open, isEdit]);
 
   useEffect(() => {
+    if (omitirResetPuesto.current) {
+      omitirResetPuesto.current = false;
+      return;
+    }
     if (selectedCargoId) {
       loadPuestos(selectedCargoId);
     } else {
@@ -50,6 +70,43 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
       setSelectedPuestoId('');
     }
   }, [selectedCargoId]);
+
+  const loadTrabajadores = async () => {
+    try {
+      setIsLoadingTrabajadores(true);
+      const data = await asistenciaService.getTrabajadores();
+      setTrabajadores(data);
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al cargar los trabajadores');
+    } finally {
+      setIsLoadingTrabajadores(false);
+    }
+  };
+
+  // Al elegir un Trabajador, buscamos su Puesto asignado (configurado en
+  // Mantenimiento de Asistencias) y autocompletamos Cargo + Puesto, sin
+  // que el usuario tenga que navegar manualmente la cascada.
+  const handleSelectTrabajador = async (trabajadorId: string) => {
+    setSelectedTrabajadorId(trabajadorId);
+    const trabajador = trabajadores.find((t) => String(t._id) === trabajadorId);
+    if (!trabajador?.puesto) {
+      showMessage('warning', 'Este trabajador no tiene un Puesto asignado todavía (revisa Mantenimiento de Asistencias)');
+      return;
+    }
+    try {
+      setIsLoadingPuestos(true);
+      const puesto = await puestosService.getPuestoById(trabajador.puesto);
+      const puestosData = await matrizProcesosService.getPuestosByCargo(puesto.CargoId);
+      omitirResetPuesto.current = true;
+      setSelectedCargoId(puesto.CargoId);
+      setPuestos(puestosData);
+      setSelectedPuestoId(puesto._id);
+    } catch (error: any) {
+      showMessage('error', error.message || 'No se pudo cargar el puesto asignado a este trabajador');
+    } finally {
+      setIsLoadingPuestos(false);
+    }
+  };
 
   const loadCargos = async () => {
     try {
@@ -81,6 +138,9 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
           setSelectedCargoId(cargo._id);
           setPuestos(puestosData);
           setSelectedPuestoId(initialPuestoId);
+          // Siempre asignamos explícitamente (incluso vacío) para no
+          // arrastrar la persona seleccionada en una edición anterior.
+          setSelectedTrabajadorId(initialTrabajadorId ? String(initialTrabajadorId) : '');
           setIsInitialized(true);
           break;
         }
@@ -114,7 +174,7 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
     const selectedPuesto = puestos.find(p => p._id === selectedPuestoId);
     const puestoNombre = selectedPuesto?.Nombre || 'Desconocido';
     
-    onSubmit(selectedPuestoId, puestoNombre);
+    onSubmit(selectedPuestoId, puestoNombre, selectedTrabajadorId || null);
   };
 
   return (
@@ -125,6 +185,30 @@ const PuestoFormDialog: React.FC<PuestoFormDialogProps> = ({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="trabajador">Elegir por persona (opcional)</Label>
+            <Select
+              value={selectedTrabajadorId}
+              onValueChange={handleSelectTrabajador}
+              disabled={isLoadingTrabajadores}
+            >
+              <SelectTrigger id="trabajador">
+                <SelectValue placeholder={isLoadingTrabajadores ? 'Cargando...' : 'Selecciona un trabajador'} />
+              </SelectTrigger>
+              <SelectContent>
+                {trabajadores.map((t) => (
+                  <SelectItem key={t._id} value={String(t._id)}>
+                    {t.nombres}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Al elegir a la persona, se completan Cargo y Puesto automáticamente. También puedes
+              elegirlos manualmente abajo.
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="cargo">Cargo</Label>
             <Select

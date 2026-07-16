@@ -57,11 +57,21 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 const Sidebar: React.FC = () => {
-  const { menus } = useAuth();
+  const { menus, user } = useAuth();
+  const esAdmin = user?.profileId === 1 || user?.profileId === 2;
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+
+  // Para perfiles que no sean Super Administrador (1) o Administrador (2),
+  // el menú arranca oculto -- solo se abre si el usuario lo pide con el
+  // botón flotante.
+  useEffect(() => {
+    if (user && !esAdmin) {
+      setIsOpen(false);
+    }
+  }, [user, esAdmin]);
 
   // Debug: mostrar todos los menús cargados
   useEffect(() => {
@@ -177,11 +187,15 @@ const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Mobile toggle button */}
+      {/* Toggle flotante: visible siempre en mobile; en desktop solo para
+          perfiles no admin (que son los que tienen el sidebar oculto) */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-4 left-4 z-50 xl:hidden bg-primary text-white p-2.5 rounded-lg shadow-lg hover:bg-primary/90 transition-colors"
+        className={cn(
+          'fixed top-4 left-4 z-50 bg-primary text-white p-2.5 rounded-lg shadow-lg hover:bg-primary/90 transition-colors',
+          esAdmin ? 'xl:hidden' : ''
+        )}
       >
         {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
@@ -197,10 +211,12 @@ const Sidebar: React.FC = () => {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 h-full bg-primary transition-all duration-300 z-40 shadow-2xl',
+          'fixed left-0 top-0 h-full bg-primary transition-all duration-300 z-40 shadow-2xl overflow-hidden',
           isOpen ? 'w-72' : 'w-0',
           'xl:relative',
-          isCollapsed ? 'xl:w-16' : 'xl:w-72'
+          esAdmin
+            ? (isCollapsed ? 'xl:w-16' : 'xl:w-72')
+            : (isOpen ? 'xl:w-72' : 'xl:w-0')
         )}
       >
         <div className="flex flex-col h-full">

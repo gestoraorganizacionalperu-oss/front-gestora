@@ -1,45 +1,230 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Save, ChevronDown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useMessage } from '@/contexts/MessageContext';
-import { produccionService, type ConfigCtrlProduccion, type DiaProgramado } from '@/services/produccionService';
+import { useAuth } from '@/contexts/AuthContext';
+import {
+  produccionService,
+  aplanarMatrizProcesos,
+  calcularHorasDecimal,
+  formatoDecimalAHoraMin,
+  type ConfigCtrlProduccion,
+  type ActividadProduccion,
+  type DiaSemana,
+  type Trabajador,
+} from '@/services/produccionService';
 
-const DIAS: { key: keyof Pick<ConfigCtrlProduccion['actividades'][number], 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes' | 'sabado'>; label: string }[] = [
-  { key: 'lunes', label: 'Lun' },
-  { key: 'martes', label: 'Mar' },
-  { key: 'miercoles', label: 'Mié' },
-  { key: 'jueves', label: 'Jue' },
-  { key: 'viernes', label: 'Vie' },
-  { key: 'sabado', label: 'Sáb' },
+const DIAS: { key: DiaSemana; label: string }[] = [
+  { key: 'lunes', label: 'Lunes' },
+  { key: 'martes', label: 'Martes' },
+  { key: 'miercoles', label: 'Miércoles' },
+  { key: 'jueves', label: 'Jueves' },
+  { key: 'viernes', label: 'Viernes' },
+  { key: 'sabado', label: 'Sábado' },
 ];
 
-const CeldaDia: React.FC<{ dia?: DiaProgramado }> = ({ dia }) => (
-  <div className="text-xs leading-tight text-center min-w-[52px]">
-    <div className="font-semibold text-foreground">{dia?.cantPro || '-'}</div>
-    <div className="text-muted-foreground">{dia?.hProg ? `${dia.hProg}h` : ''}</div>
-  </div>
+const celdaEstilo = 'border border-border px-1 py-1 text-xs';
+const celdaHeaderEstilo = 'border border-border px-2 py-1.5 text-xs font-semibold text-primary uppercase whitespace-nowrap';
+
+const CampoNumero: React.FC<{
+  valor: string;
+  onChange: (valor: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+}> = ({ valor, onChange, placeholder, disabled }) => (
+  <input
+    type="text"
+    inputMode="decimal"
+    value={valor}
+    onChange={(e) => onChange(e.target.value)}
+    placeholder={placeholder}
+    disabled={disabled}
+    className="w-12 text-center text-xs border border-input rounded px-1 py-0.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+  />
 );
+
+const SelectorResponsable: React.FC<{
+  valor: string;
+  onChange: (valor: string) => void;
+  trabajadores: Trabajador[];
+  disabled?: boolean;
+}> = ({ valor, onChange, trabajadores, disabled }) => {
+  const [editando, setEditando] = useState(false);
+  const nombre = trabajadores.find((t) => String(t._id) === valor)?.nombres;
+
+  if (editando) {
+    return (
+      <select
+        autoFocus
+        value={valor}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setEditando(false);
+        }}
+        onBlur={() => setEditando(false)}
+        disabled={disabled}
+        className="text-xs border border-input rounded px-1 py-1 bg-background w-full min-w-[110px] disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <option value="">Sin asignar</option>
+        {trabajadores.map((t) => (
+          <option key={t._id} value={String(t._id)}>
+            {t.nombres}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && setEditando(true)}
+      disabled={disabled}
+      title={disabled ? undefined : 'Clic para cambiar responsable'}
+      className="text-xs w-full flex items-center justify-between gap-1 px-1 py-1 rounded truncate hover:bg-muted/60 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+    >
+      <span className="truncate">{nombre || <span className="text-muted-foreground">Sin asignar</span>}</span>
+      {!disabled && <ChevronDown className="w-3 h-3 shrink-0 text-muted-foreground" />}
+    </button>
+  );
+};
 
 const AdminControlProduccion: React.FC = () => {
   const { showMessage } = useMessage();
+  const { user } = useAuth();
+  // Solo Super Administrador (1) y Administrador (2) pueden editar esta
+  // pantalla. El resto de perfiles (Responsable, Observador, Gestor,
+  // Trabajador) la ven en modo solo lectura.
+  const PERFILES_EDITORES = [1, 2];
+  const puedeEditar = !!user?.profileId && PERFILES_EDITORES.includes(user.profileId);
+
   const [config, setConfig] = useState<ConfigCtrlProduccion | null>(null);
+  const [actividades, setActividades] = useState<ActividadProduccion[]>([]);
+  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+  const [hayCambios, setHayCambios] = useState(false);
+  // trabajadorId sugerido por Matriz de Procesos para cada actividad (por
+  // actividadId) -- se usa solo para el botón "Rellenar vacíos desde
+  // Matriz", nunca se aplica automáticamente sobre datos ya guardados.
+  const [trabajadorIdPorActividad, setTrabajadorIdPorActividad] = useState<Map<string, string>>(new Map());
+  const [rellenando, setRellenando] = useState(false);
+  // Por defecto, la columna "Resp." de cada día queda oculta (colapsada)
+  // para que la tabla se vea más limpia -- se muestra solo al presionar
+  // el botón "Editar responsables".
+  const [mostrarResponsables, setMostrarResponsables] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
 
   useEffect(() => {
-    loadConfiguracion();
+    cargarTodo();
   }, []);
 
-  const loadConfiguracion = async () => {
+  const cargarTodo = async () => {
     try {
       setIsLoading(true);
-      const data = await produccionService.getConfiguracion();
-      setConfig(data);
+      const [cfg, macroprocesos, trabs] = await Promise.all([
+        produccionService.getConfiguracion(),
+        produccionService.getMatrizProcesos(),
+        produccionService.getTrabajadores(),
+      ]);
+      // Limpieza del mismo campo legado en "Proyectos/Otros" (por si el
+      // documento se guardó antes de este cambio, con un responsableId
+      // único a nivel de fila en vez de por día).
+      const proyectoOtroConDiaResponsable = (dia?: { hProg: string; cantPro: string; responsableId?: string }) => ({
+        hProg: dia?.hProg || '',
+        cantPro: dia?.cantPro || '',
+        responsableId: dia?.responsableId ?? (cfg?.proyectoOtro as any)?.responsableId ?? '',
+      });
+      const proyectoOtroLimpio = cfg
+        ? {
+            descripcion: cfg.proyectoOtro?.descripcion || '',
+            lunes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.lunes),
+            martes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.martes),
+            miercoles: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.miercoles),
+            jueves: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.jueves),
+            viernes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.viernes),
+            sabado: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.sabado),
+          }
+        : undefined;
+      setConfig(cfg ? { ...cfg, proyectoOtro: proyectoOtroLimpio as any } : cfg);
+      setTrabajadores(trabs);
+
+      // La Matriz de Procesos es la lista MAESTRA de actividades -- nunca
+      // se pierde ni se edita desde aquí. config_ctrl_produccion solo aporta
+      // horario/responsable si existen; si a una actividad le falta esa
+      // info, se completa vacía (o con el responsable sugerido por la
+      // matriz) en vez de desaparecer.
+      const maestras = aplanarMatrizProcesos(macroprocesos);
+      const trabajadorIdPorActividadTemp = new Map<string, string>();
+      maestras.forEach((m) => {
+        if (m.trabajadorId != null) trabajadorIdPorActividadTemp.set(m.actividadId, String(m.trabajadorId));
+      });
+      setTrabajadorIdPorActividad(trabajadorIdPorActividadTemp);
+      const configPorId = new Map((cfg?.actividades || []).map((a) => [a.actividadId, a]));
+
+      const fusionadas: ActividadProduccion[] = maestras.map((m) => {
+        const existente = configPorId.get(m.actividadId);
+
+        if (existente) {
+          // Migración suave: documentos guardados antes de este cambio
+          // tenían un único "responsableId" por fila (no por día). Si un
+          // día todavía no tiene su propio responsable asignado, se usa
+          // ese valor legado como punto de partida para no perder la
+          // asignación previa.
+          const legado = (existente as any).responsableId as string | undefined;
+          const conResponsablePorDia = (dia?: {
+            hProg: string;
+            cantPro: string;
+            horaInicio?: string;
+            horaFin?: string;
+            responsableId?: string;
+          }) => ({
+            hProg: dia?.hProg || '',
+            cantPro: dia?.cantPro || '',
+            horaInicio: dia?.horaInicio || '',
+            horaFin: dia?.horaFin || '',
+            responsableId: dia?.responsableId ?? legado ?? '',
+          });
+
+          return {
+            actividadId: existente.actividadId,
+            actividadNombre: existente.actividadNombre,
+            procesoNombre: existente.procesoNombre,
+            subprocesoNombre: existente.subprocesoNombre,
+            lunes: conResponsablePorDia(existente.lunes),
+            martes: conResponsablePorDia(existente.martes),
+            miercoles: conResponsablePorDia(existente.miercoles),
+            jueves: conResponsablePorDia(existente.jueves),
+            viernes: conResponsablePorDia(existente.viernes),
+            sabado: conResponsablePorDia(existente.sabado),
+          };
+        }
+
+        // Sin datos guardados: sugerimos el responsable usando el
+        // trabajadorId real que viene de Matriz de Procesos (ya no
+        // adivinamos por coincidencia de texto en el nombre).
+        const sugeridoId =
+          m.trabajadorId != null && trabs.some((t) => String(t._id) === String(m.trabajadorId))
+            ? String(m.trabajadorId)
+            : '';
+        const diaConSugerido = () => ({ hProg: '', cantPro: '', responsableId: sugeridoId });
+
+        return {
+          actividadId: m.actividadId,
+          actividadNombre: m.actividadNombre,
+          procesoNombre: m.procesoNombre,
+          subprocesoNombre: m.subprocesoNombre,
+          lunes: diaConSugerido(),
+          martes: diaConSugerido(),
+          miercoles: diaConSugerido(),
+          jueves: diaConSugerido(),
+          viernes: diaConSugerido(),
+          sabado: diaConSugerido(),
+        };
+      });
+
+      setActividades(fusionadas);
+      setHayCambios(false);
     } catch (error: any) {
       showMessage('error', error.message || 'Error al cargar la configuración de producción');
     } finally {
@@ -47,70 +232,363 @@ const AdminControlProduccion: React.FC = () => {
     }
   };
 
+  const actualizarCelda = (
+    actividadId: string,
+    dia: DiaSemana,
+    campo: 'hProg' | 'cantPro' | 'horaInicio' | 'horaFin',
+    valor: string
+  ) => {
+    setActividades((prev) =>
+      prev.map((a) => {
+        if (a.actividadId !== actividadId) return a;
+        const diaActualizado = { ...a[dia], [campo]: valor };
+        // Si se editó Hora Inicio u Hora Fin, recalculamos H.Prog
+        // automáticamente -- ya no se escribe a mano.
+        if (campo === 'horaInicio' || campo === 'horaFin') {
+          diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+        }
+        return { ...a, [dia]: diaActualizado };
+      })
+    );
+    setHayCambios(true);
+  };
+
+  // El responsable ahora se asigna por día: cada actividad puede tener una
+  // persona distinta el lunes, otra el martes, etc.
+  const actualizarResponsableDia = (actividadId: string, dia: DiaSemana, responsableId: string) => {
+    setActividades((prev) =>
+      prev.map((a) =>
+        a.actividadId === actividadId
+          ? { ...a, [dia]: { ...a[dia], responsableId } }
+          : a
+      )
+    );
+    setHayCambios(true);
+  };
+
+  const actualizarResponsableDiaProyectoOtro = (dia: DiaSemana, responsableId: string) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const actualizado = {
+        ...prev,
+        proyectoOtro: {
+          ...prev.proyectoOtro,
+          [dia]: { ...prev.proyectoOtro?.[dia], responsableId },
+        },
+      };
+      return actualizado;
+    });
+    setHayCambios(true);
+  };
+
+  const actualizarCampoProyectoOtro = (
+    dia: DiaSemana,
+    campo: 'hProg' | 'cantPro' | 'horaInicio' | 'horaFin',
+    valor: string
+  ) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const diaActualizado = { ...prev.proyectoOtro?.[dia], [campo]: valor };
+      if (campo === 'horaInicio' || campo === 'horaFin') {
+        diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+      }
+      return {
+        ...prev,
+        proyectoOtro: { ...prev.proyectoOtro, [dia]: diaActualizado },
+      };
+    });
+    setHayCambios(true);
+  };
+
+  // Guarda únicamente en config_ctrl_produccion. Este módulo ya NO escribe
+  // en Matriz de Procesos bajo ninguna circunstancia -- Matriz de Procesos
+  // es la fuente maestra de actividades (qué existe), mientras que este
+  // módulo solo coordina la planificación semanal (horas, cantidades y
+  // quién es responsable cada día).
+  const handleGuardar = async () => {
+    try {
+      setGuardando(true);
+      await produccionService.updateConfiguracion({
+        actividades,
+        proyectoOtro: config?.proyectoOtro,
+      });
+      showMessage('success', 'Configuración guardada correctamente');
+      setHayCambios(false);
+      await cargarTodo();
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al guardar la configuración');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  // Rellena SOLO los días que dicen "Sin asignar" (responsableId vacío),
+  // usando el trabajadorId sugerido por Matriz de Procesos para esa
+  // actividad. Nunca toca un día que ya tenga alguien asignado -- eso
+  // quedaría exactamente como estaba, aunque sea distinto al de la Matriz.
+  // No escribe nada en Matriz de Procesos, solo lee de ahí.
+  const handleRellenarVacios = async () => {
+    try {
+      setRellenando(true);
+      let celdasRellenadas = 0;
+
+      const actividadesActualizadas = actividades.map((act) => {
+        const sugeridoId = trabajadorIdPorActividad.get(act.actividadId);
+        if (!sugeridoId) return act;
+
+        const rellenarDia = (dia: { hProg: string; cantPro: string; responsableId?: string }) => {
+          if (dia.responsableId) return dia; // ya tiene alguien, no se toca
+          celdasRellenadas += 1;
+          return { ...dia, responsableId: sugeridoId };
+        };
+
+        return {
+          ...act,
+          lunes: rellenarDia(act.lunes),
+          martes: rellenarDia(act.martes),
+          miercoles: rellenarDia(act.miercoles),
+          jueves: rellenarDia(act.jueves),
+          viernes: rellenarDia(act.viernes),
+          sabado: rellenarDia(act.sabado),
+        };
+      });
+
+      setActividades(actividadesActualizadas);
+      if (celdasRellenadas > 0) {
+        setHayCambios(true);
+        showMessage('success', `Se rellenaron ${celdasRellenadas} celda(s) vacía(s) desde Matriz de Procesos. Presiona "Guardar" para confirmar.`);
+      } else {
+        showMessage('success', 'No había celdas vacías con un responsable sugerido disponible en la Matriz.');
+      }
+    } catch (error: any) {
+      showMessage('error', error.message || 'Error al rellenar los responsables');
+    } finally {
+      setRellenando(false);
+    }
+  };
+
+  // Filtra por Proceso, Subproceso, Actividad, o el nombre del Responsable
+  // asignado en cualquier día de la semana (sin distinguir mayúsculas).
+  const actividadesFiltradas = busqueda.trim()
+    ? actividades.filter((act) => {
+        const termino = busqueda.trim().toLowerCase();
+        const coincideDatosBasicos =
+          act.procesoNombre.toLowerCase().includes(termino) ||
+          act.subprocesoNombre.toLowerCase().includes(termino) ||
+          act.actividadNombre.toLowerCase().includes(termino);
+        if (coincideDatosBasicos) return true;
+
+        return DIAS.some((d) => {
+          const responsableId = act[d.key]?.responsableId;
+          if (!responsableId) return false;
+          const nombre = trabajadores.find((t) => String(t._id) === responsableId)?.nombres || '';
+          return nombre.toLowerCase().includes(termino);
+        });
+      })
+    : actividades;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Administración Control de Producción</h1>
-        <p className="text-muted-foreground mt-1">
-          Metas semanales de producción por actividad (cantidad y horas programadas)
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Administración Control de Producción</h1>
+          <p className="text-muted-foreground mt-1">
+            Metas semanales de producción por actividad (cantidad y horas programadas)
+          </p>
+        </div>
+        {!puedeEditar && (
+          <span className="text-xs text-muted-foreground italic">Modo solo lectura</span>
+        )}
+        {puedeEditar && (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setMostrarResponsables((v) => !v)}
+            >
+              {mostrarResponsables ? 'Ocultar responsables' : 'Editar responsables'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleRellenarVacios}
+              disabled={rellenando || guardando}
+              title="Rellena solo las celdas 'Sin asignar' usando el responsable definido en Matriz de Procesos. Nunca toca los días que ya tienen alguien asignado."
+            >
+              {rellenando ? 'Rellenando...' : 'Rellenar vacíos desde Matriz'}
+            </Button>
+            <Button onClick={handleGuardar} disabled={!hayCambios || guardando}>
+              <Save className="w-4 h-4 mr-2" />
+              {guardando ? 'Guardando...' : 'Guardar'}
+            </Button>
+          </div>
+        )}
       </div>
 
+      <input
+        type="text"
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        placeholder="Buscar por proceso, subproceso, actividad o responsable..."
+        className="w-full max-w-md text-sm border border-input rounded-md px-3 py-2 bg-background"
+      />
+
       <div className="border rounded-lg bg-card overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="min-w-[200px]">Actividad</TableHead>
-              <TableHead className="min-w-[180px]">Proceso</TableHead>
+        <table className="w-full table-auto border-collapse">
+          <thead>
+            <tr>
+              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Proceso</th>
+              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Subproceso</th>
+              <th className={`${celdaHeaderEstilo} text-left`} rowSpan={2}>Actividades</th>
               {DIAS.map((d) => (
-                <TableHead key={d.key} className="text-center">{d.label}</TableHead>
+                <th key={d.key} className={`${celdaHeaderEstilo} text-center`} colSpan={mostrarResponsables ? 5 : 4}>{d.label}</th>
               ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+            </tr>
+            <tr>
+              {DIAS.map((d) => (
+                <React.Fragment key={d.key}>
+                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Inicio</th>
+                  <th className={`${celdaHeaderEstilo} text-center`}>Hora Fin</th>
+                  <th className={`${celdaHeaderEstilo} text-center`}>H.Prog</th>
+                  <th className={`${celdaHeaderEstilo} text-center`}>Cant.Pro</th>
+                  {mostrarResponsables && <th className={`${celdaHeaderEstilo} text-center`}>Resp.</th>}
+                </React.Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
             {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+              <tr>
+                <td colSpan={3 + DIAS.length * (mostrarResponsables ? 5 : 4)} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
                   Cargando configuración...
-                </TableCell>
-              </TableRow>
-            ) : !config || config.actividades.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                  No hay actividades configuradas todavía
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
+            ) : actividadesFiltradas.length === 0 ? (
+              <tr>
+                <td colSpan={3 + DIAS.length * (mostrarResponsables ? 5 : 4)} className={`${celdaEstilo} text-center text-muted-foreground py-6`}>
+                  {busqueda.trim()
+                    ? `No se encontraron actividades para "${busqueda}".`
+                    : 'No hay actividades en la Matriz de Procesos todavía'}
+                </td>
+              </tr>
             ) : (
-              config.actividades.map((act) => (
-                <TableRow key={act.actividadId}>
-                  <TableCell className="font-medium">{act.actividadNombre}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{act.procesoNombre}</TableCell>
+              actividadesFiltradas.map((act) => (
+                <tr key={act.actividadId}>
+                  <td className={`${celdaEstilo} text-muted-foreground`}>{act.procesoNombre}</td>
+                  <td className={`${celdaEstilo} text-muted-foreground`}>{act.subprocesoNombre}</td>
+                  <td className={`${celdaEstilo} font-medium`}>{act.actividadNombre}</td>
                   {DIAS.map((d) => (
-                    <TableCell key={d.key} className="p-2">
-                      <CeldaDia dia={act[d.key]} />
-                    </TableCell>
+                    <React.Fragment key={d.key}>
+                      <td className={celdaEstilo}>
+                        <input
+                          type="time"
+                          value={act[d.key]?.horaInicio || ''}
+                          onChange={(e) => actualizarCelda(act.actividadId, d.key, 'horaInicio', e.target.value)}
+                          disabled={!puedeEditar}
+                          className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                      <td className={celdaEstilo}>
+                        <input
+                          type="time"
+                          value={act[d.key]?.horaFin || ''}
+                          onChange={(e) => actualizarCelda(act.actividadId, d.key, 'horaFin', e.target.value)}
+                          disabled={!puedeEditar}
+                          className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                      <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                        {formatoDecimalAHoraMin(act[d.key]?.hProg)}
+                      </td>
+                      <td className={celdaEstilo}>
+                        <CampoNumero
+                          valor={act[d.key]?.cantPro || ''}
+                          onChange={(v) => actualizarCelda(act.actividadId, d.key, 'cantPro', v)}
+                          placeholder="—"
+                        disabled={!puedeEditar}
+                        />
+                      </td>
+                      {mostrarResponsables && (
+                        <td className={celdaEstilo}>
+                          <SelectorResponsable
+                            valor={act[d.key]?.responsableId || ''}
+                            onChange={(v) => actualizarResponsableDia(act.actividadId, d.key, v)}
+                            trabajadores={trabajadores}
+                            disabled={!puedeEditar}
+                          />
+                        </td>
+                      )}
+                    </React.Fragment>
                   ))}
-                </TableRow>
+                </tr>
               ))
             )}
-            {config?.proyectoOtro?.descripcion && (
-              <TableRow>
-                <TableCell className="font-medium italic">
-                  {config.proyectoOtro.descripcion || 'Proyecto adicional'}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">-</TableCell>
+            {config && (
+              <tr className="bg-muted/30">
+                <td colSpan={2} className={`${celdaEstilo} font-semibold uppercase`}>Proyectos / Otros</td>
+                <td className={celdaEstilo}>
+                  <input
+                    type="text"
+                    value={config.proyectoOtro?.descripcion || ''}
+                    onChange={(e) =>
+                      setConfig((prev) =>
+                        prev ? { ...prev, proyectoOtro: { ...prev.proyectoOtro, descripcion: e.target.value } } : prev
+                      )
+                    }
+                    onBlur={() => setHayCambios(true)}
+                    placeholder="Descripción..."
+                    disabled={!puedeEditar}
+                    className="w-full text-xs border border-input rounded px-2 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                  />
+                </td>
                 {DIAS.map((d) => (
-                  <TableCell key={d.key} className="p-2">
-                    <CeldaDia dia={config.proyectoOtro[d.key]} />
-                  </TableCell>
+                  <React.Fragment key={d.key}>
+                    <td className={celdaEstilo}>
+                      <input
+                        type="time"
+                        value={config.proyectoOtro?.[d.key]?.horaInicio || ''}
+                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaInicio', e.target.value)}
+                        disabled={!puedeEditar}
+                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                    </td>
+                    <td className={celdaEstilo}>
+                      <input
+                        type="time"
+                        value={config.proyectoOtro?.[d.key]?.horaFin || ''}
+                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaFin', e.target.value)}
+                        disabled={!puedeEditar}
+                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                    </td>
+                    <td className={`${celdaEstilo} text-center font-medium text-muted-foreground`}>
+                      {formatoDecimalAHoraMin(config.proyectoOtro?.[d.key]?.hProg)}
+                    </td>
+                    <td className={celdaEstilo}>
+                      <CampoNumero
+                        valor={config.proyectoOtro?.[d.key]?.cantPro || ''}
+                        onChange={(v) => actualizarCampoProyectoOtro(d.key, 'cantPro', v)}
+                        placeholder="—"
+                      disabled={!puedeEditar}
+                      />
+                    </td>
+                    {mostrarResponsables && (
+                      <td className={celdaEstilo}>
+                        <SelectorResponsable
+                          valor={config.proyectoOtro?.[d.key]?.responsableId || ''}
+                          onChange={(v) => actualizarResponsableDiaProyectoOtro(d.key, v)}
+                          trabajadores={trabajadores}
+                          disabled={!puedeEditar}
+                        />
+                      </td>
+                    )}
+                  </React.Fragment>
                 ))}
-              </TableRow>
+              </tr>
             )}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        Cada celda muestra la cantidad programada (arriba) y las horas programadas (abajo) para ese día.
+        {hayCambios && <span className="text-amber-600 font-medium">Tienes cambios sin guardar.</span>}
       </p>
     </div>
   );

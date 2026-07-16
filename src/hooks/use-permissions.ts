@@ -12,7 +12,7 @@ export const usePermissions = () => {
   const { user } = useAuth();
 
   // Perfiles de solo lectura
-  const READ_ONLY_PROFILES = [3, 4];
+   const READ_ONLY_PROFILES = [3, 4, 5, 6];
 
   // Verificar si el usuario tiene un perfil de solo lectura
   const isReadOnly = user?.profileId ? READ_ONLY_PROFILES.includes(user.profileId) : false;

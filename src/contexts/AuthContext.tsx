@@ -53,6 +53,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // No lanzar error, continuar con el login
       }
 
+      // Perfiles que no sean Super Administrador (1) o Administrador (2)
+      // entran directo a Gestión de Producción, sin importar el orden
+      // de sus menús.
+      const PERFILES_ADMIN = [1, 2];
+      if (usuario.profileId && !PERFILES_ADMIN.includes(usuario.profileId)) {
+        return '/gestion-produccion';
+      }
+
       // Retornar la ruta del primer menú disponible
       if (userMenus && userMenus.length > 0) {
         const firstMenu = userMenus[0];

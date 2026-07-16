@@ -1,4 +1,12 @@
+allowBuilds:
+  core-js: true
+  esbuild: true
+
 catalog:
   '@react-three/drei': 9.122.0
   '@react-three/fiber': 8.18.0
   three: 0.180.0
+
+onlyBuiltDependencies:
+  - core-js
+  - esbuild
