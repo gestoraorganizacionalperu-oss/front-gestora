@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Save, ChevronDown, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMessage } from '@/contexts/MessageContext';
@@ -124,6 +124,24 @@ const AdminControlProduccion: React.FC = () => {
   // Semana que se está viendo/editando (Lunes de esa semana, "YYYY-MM-DD").
   // Cada semana guarda su propia configuración por separado.
   const [semanaInicio, setSemanaInicio] = useState(() => calcularLunesDeSemana(new Date().toISOString().split('T')[0]));
+
+  // Detecta si la barra de título+botones ya quedó "pegada" arriba (vs.
+  // en su posición normal), solo para mostrar una sombra/borde sutil
+  // cuando corresponde -- el pegado en sí (sticky) es puro CSS, esto es
+  // solo el detalle visual de "se despegó del contenido".
+  const [barraFija, setBarraFija] = useState(false);
+  const sentinelaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nodo = sentinelaRef.current;
+    if (!nodo) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setBarraFija(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(nodo);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     cargarTodo();
@@ -479,38 +497,47 @@ const AdminControlProduccion: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Administración Control de Producción</h1>
-          <p className="text-muted-foreground mt-1">
-            Metas semanales de producción por actividad (cantidad y horas programadas)
-          </p>
-        </div>
-        {!puedeEditar && (
-          <span className="text-xs text-muted-foreground italic">Modo solo lectura</span>
-        )}
-        {puedeEditar && (
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setMostrarResponsables((v) => !v)}
-            >
-              {mostrarResponsables ? 'Ocultar responsables' : 'Editar responsables'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleRellenarVacios}
-              disabled={rellenando || guardando}
-              title="Rellena solo las celdas 'Sin asignar' usando el responsable definido en Matriz de Procesos. Nunca toca los días que ya tienen alguien asignado."
-            >
-              {rellenando ? 'Rellenando...' : 'Rellenar vacíos desde Matriz'}
-            </Button>
-            <Button onClick={handleGuardar} disabled={!hayCambios || guardando}>
-              <Save className="w-4 h-4 mr-2" />
-              {guardando ? 'Guardando...' : 'Guardar'}
-            </Button>
+      {/* Sentinela invisible: en cuanto sale de vista (scrolleada hacia
+          arriba), sabemos que la barra de abajo ya quedó pegada. */}
+      <div ref={sentinelaRef} className="h-px -mb-6" />
+      <div
+        className={`sticky -top-6 -mx-6 -mt-6 z-20 bg-background px-6 pt-6 pb-3 transition-shadow ${
+          barraFija ? 'border-b border-border shadow-sm' : 'border-b border-transparent'
+        }`}
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Administración Control de Producción</h1>
+            <p className="text-muted-foreground mt-1">
+              Metas semanales de producción por actividad (cantidad y horas programadas)
+            </p>
           </div>
-        )}
+          {!puedeEditar && (
+            <span className="text-xs text-muted-foreground italic">Modo solo lectura</span>
+          )}
+          {puedeEditar && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setMostrarResponsables((v) => !v)}
+              >
+                {mostrarResponsables ? 'Ocultar responsables' : 'Editar responsables'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleRellenarVacios}
+                disabled={rellenando || guardando}
+                title="Rellena solo las celdas 'Sin asignar' usando el responsable definido en Matriz de Procesos. Nunca toca los días que ya tienen alguien asignado."
+              >
+                {rellenando ? 'Rellenando...' : 'Rellenar vacíos desde Matriz'}
+              </Button>
+              <Button onClick={handleGuardar} disabled={!hayCambios || guardando}>
+                <Save className="w-4 h-4 mr-2" />
+                {guardando ? 'Guardando...' : 'Guardar'}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
