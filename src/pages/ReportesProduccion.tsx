@@ -9,6 +9,8 @@ import {
   construirReporteDetallada,
   construirRendimientoPorResponsable,
   calcularLunesDeSemana,
+  todasLasFilas,
+  getDiaSemana,
   type IndicadoresProduccion,
   type ConfigCtrlProduccion,
   type FilaResumida,
@@ -138,7 +140,14 @@ const ReportesProduccion: React.FC = () => {
       .getRegistrosPorFecha(fechaSeleccionada)
       .then((registrosHoy) => {
         setRegistrosHoyCompletos(registrosHoy);
-        setTotalActividadesHoy(config?.actividades.length || registrosHoy.length);
+        const diaSemana = getDiaSemana(fechaSeleccionada);
+        const conDatosEseDia = diaSemana
+          ? todasLasFilas(config).filter((fila) => {
+              const d = fila[diaSemana];
+              return !!(d?.horaInicio || d?.horaFin || d?.hProg || d?.cantPro);
+            }).length
+          : 0;
+        setTotalActividadesHoy(conDatosEseDia);
         setCompletadasHoy(registrosHoy.filter((r) => r.estado === 'completado').length);
         setEnProgresoHoy(registrosHoy.filter((r) => r.estado === 'en_progreso' || r.estado === 'pendiente').length);
         setTotalLogradosHoy(registrosHoy.reduce((sum, r) => sum + (Number(r.logrados) || 0), 0));
