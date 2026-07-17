@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, ChevronDown } from 'lucide-react';
+import { Save, ChevronDown, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMessage } from '@/contexts/MessageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,7 +7,6 @@ import {
   produccionService,
   aplanarMatrizProcesos,
   calcularHorasDecimal,
-  formatoDecimalAHoraMin,
   calcularLunesDeSemana,
   sumarSemanas,
   type ConfigCtrlProduccion,
@@ -138,26 +137,27 @@ const AdminControlProduccion: React.FC = () => {
         produccionService.getMatrizProcesos(),
         produccionService.getTrabajadores(),
       ]);
-      // Limpieza del mismo campo legado en "Proyectos/Otros" (por si el
-      // documento se guardó antes de este cambio, con un responsableId
-      // único a nivel de fila en vez de por día).
-      const proyectoOtroConDiaResponsable = (dia?: { hProg: string; cantPro: string; responsableId?: string }) => ({
+      // Normaliza cada fila de "Proyectos/Otros" (por si viene con algún
+      // día sin inicializar desde el backend) y le asegura un id -- por
+      // si algún documento viejo se coló sin pasar por la migración.
+      const diaLimpio = (dia?: { hProg: string; cantPro: string; responsableId?: string; horaInicio?: string; horaFin?: string }) => ({
         hProg: dia?.hProg || '',
         cantPro: dia?.cantPro || '',
-        responsableId: dia?.responsableId ?? (cfg?.proyectoOtro as any)?.responsableId ?? '',
+        horaInicio: dia?.horaInicio || '',
+        horaFin: dia?.horaFin || '',
+        responsableId: dia?.responsableId || '',
       });
-      const proyectoOtroLimpio = cfg
-        ? {
-            descripcion: cfg.proyectoOtro?.descripcion || '',
-            lunes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.lunes),
-            martes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.martes),
-            miercoles: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.miercoles),
-            jueves: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.jueves),
-            viernes: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.viernes),
-            sabado: proyectoOtroConDiaResponsable(cfg.proyectoOtro?.sabado),
-          }
-        : undefined;
-      setConfig(cfg ? { ...cfg, proyectoOtro: proyectoOtroLimpio as any } : cfg);
+      const proyectosOtrosLimpios = (cfg?.proyectosOtros || []).map((p: any) => ({
+        id: p.id || `temp-${Math.random().toString(36).slice(2)}`,
+        descripcion: p.descripcion || '',
+        lunes: diaLimpio(p.lunes),
+        martes: diaLimpio(p.martes),
+        miercoles: diaLimpio(p.miercoles),
+        jueves: diaLimpio(p.jueves),
+        viernes: diaLimpio(p.viernes),
+        sabado: diaLimpio(p.sabado),
+      }));
+      setConfig(cfg ? { ...cfg, proyectosOtros: proyectosOtrosLimpios } : cfg);
       setTrabajadores(trabs);
 
       // La Matriz de Procesos es la lista MAESTRA de actividades -- nunca
@@ -253,8 +253,12 @@ const AdminControlProduccion: React.FC = () => {
       prev.map((a) => {
         if (a.actividadId !== actividadId) return a;
         const diaActualizado = { ...a[dia], [campo]: valor };
-        // Si se editó Hora Inicio u Hora Fin, recalculamos H.Prog
-        // automáticamente -- ya no se escribe a mano.
+        // H.Prog se recalcula automáticamente si se editó Hora Inicio u
+        // Hora Fin (para no dejarlo desactualizado). Pero también se puede
+        // escribir directamente a mano (por ejemplo, cuando no hay un
+        // horario fijo pero sí se sabe cuántas horas programadas tiene la
+        // actividad ese día) -- en ese caso, editar hProg no toca Hora
+        // Inicio/Fin.
         if (campo === 'horaInicio' || campo === 'horaFin') {
           diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
         }
@@ -277,37 +281,84 @@ const AdminControlProduccion: React.FC = () => {
     setHayCambios(true);
   };
 
-  const actualizarResponsableDiaProyectoOtro = (dia: DiaSemana, responsableId: string) => {
+  const actualizarResponsableDiaProyectoOtro = (proyectoId: string, dia: DiaSemana, responsableId: string) => {
     setConfig((prev) => {
       if (!prev) return prev;
-      const actualizado = {
+      return {
         ...prev,
-        proyectoOtro: {
-          ...prev.proyectoOtro,
-          [dia]: { ...prev.proyectoOtro?.[dia], responsableId },
-        },
+        proyectosOtros: prev.proyectosOtros.map((p) =>
+          p.id === proyectoId ? { ...p, [dia]: { ...p[dia], responsableId } } : p
+        ),
       };
-      return actualizado;
     });
     setHayCambios(true);
   };
 
   const actualizarCampoProyectoOtro = (
+    proyectoId: string,
     dia: DiaSemana,
     campo: 'hProg' | 'cantPro' | 'horaInicio' | 'horaFin',
     valor: string
   ) => {
     setConfig((prev) => {
       if (!prev) return prev;
-      const diaActualizado = { ...prev.proyectoOtro?.[dia], [campo]: valor };
-      if (campo === 'horaInicio' || campo === 'horaFin') {
-        diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
-      }
       return {
         ...prev,
-        proyectoOtro: { ...prev.proyectoOtro, [dia]: diaActualizado },
+        proyectosOtros: prev.proyectosOtros.map((p) => {
+          if (p.id !== proyectoId) return p;
+          const diaActualizado = { ...p[dia], [campo]: valor };
+          if (campo === 'horaInicio' || campo === 'horaFin') {
+            diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+          }
+          return { ...p, [dia]: diaActualizado };
+        }),
       };
     });
+    setHayCambios(true);
+  };
+
+  const actualizarDescripcionProyectoOtro = (proyectoId: string, descripcion: string) => {
+    setConfig((prev) =>
+      prev
+        ? {
+            ...prev,
+            proyectosOtros: prev.proyectosOtros.map((p) => (p.id === proyectoId ? { ...p, descripcion } : p)),
+          }
+        : prev
+    );
+    setHayCambios(true);
+  };
+
+  const diaVacio = () => ({ hProg: '', cantPro: '', horaInicio: '', horaFin: '', responsableId: '' });
+
+  const agregarFilaProyectoOtro = () => {
+    setConfig((prev) =>
+      prev
+        ? {
+            ...prev,
+            proyectosOtros: [
+              ...prev.proyectosOtros,
+              {
+                id: `temp-${Math.random().toString(36).slice(2)}`,
+                descripcion: '',
+                lunes: diaVacio(),
+                martes: diaVacio(),
+                miercoles: diaVacio(),
+                jueves: diaVacio(),
+                viernes: diaVacio(),
+                sabado: diaVacio(),
+              },
+            ],
+          }
+        : prev
+    );
+    setHayCambios(true);
+  };
+
+  const eliminarFilaProyectoOtro = (proyectoId: string) => {
+    setConfig((prev) =>
+      prev ? { ...prev, proyectosOtros: prev.proyectosOtros.filter((p) => p.id !== proyectoId) } : prev
+    );
     setHayCambios(true);
   };
 
@@ -322,7 +373,7 @@ const AdminControlProduccion: React.FC = () => {
       await produccionService.updateConfiguracion({
         semanaInicio,
         actividades,
-        proyectoOtro: config?.proyectoOtro,
+        proyectosOtros: config?.proyectosOtros || [],
       });
       showMessage('success', 'Configuración guardada correctamente');
       setHayCambios(false);
@@ -569,8 +620,13 @@ const AdminControlProduccion: React.FC = () => {
                           className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </td>
-                      <td className={`${celdaEstilo} ${d.cellBg} text-center font-medium text-muted-foreground`}>
-                        {formatoDecimalAHoraMin(act[d.key]?.hProg)}
+                      <td className={`${celdaEstilo} ${d.cellBg}`}>
+                        <CampoNumero
+                          valor={act[d.key]?.hProg || ''}
+                          onChange={(v) => actualizarCelda(act.actividadId, d.key, 'hProg', v)}
+                          placeholder="—"
+                          disabled={!puedeEditar}
+                        />
                       </td>
                       <td className={`${celdaEstilo} ${d.cellBg}`}>
                         <CampoNumero
@@ -596,67 +652,115 @@ const AdminControlProduccion: React.FC = () => {
               ))
             )}
             {config && (
-              <tr className="bg-muted/30">
-                <td colSpan={2} className={`${celdaEstilo} font-semibold uppercase`}>Proyectos / Otros</td>
-                <td className={celdaEstilo}>
-                  <input
-                    type="text"
-                    value={config.proyectoOtro?.descripcion || ''}
-                    onChange={(e) =>
-                      setConfig((prev) =>
-                        prev ? { ...prev, proyectoOtro: { ...prev.proyectoOtro, descripcion: e.target.value } } : prev
-                      )
-                    }
-                    onBlur={() => setHayCambios(true)}
-                    placeholder="Descripción..."
-                    disabled={!puedeEditar}
-                    className="w-full text-xs border border-input rounded px-2 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
-                  />
-                </td>
-                {DIAS.map((d) => (
-                  <React.Fragment key={d.key}>
-                    <td className={`${celdaEstilo} ${d.cellBg}`}>
-                      <input
-                        type="time"
-                        value={config.proyectoOtro?.[d.key]?.horaInicio || ''}
-                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaInicio', e.target.value)}
-                        disabled={!puedeEditar}
-                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
-                      />
+              <>
+                <tr className="bg-muted/50">
+                  <td colSpan={3} className={`${celdaEstilo} font-semibold uppercase`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Proyectos / Otros</span>
+                      {puedeEditar && (
+                        <button
+                          type="button"
+                          onClick={agregarFilaProyectoOtro}
+                          className="text-xs font-normal normal-case text-primary hover:underline whitespace-nowrap"
+                        >
+                          + Agregar actividad
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td colSpan={DIAS.length * (mostrarResponsables ? 5 : 4)} className={`${celdaEstilo} bg-muted/50`} />
+                </tr>
+                {config.proyectosOtros.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={3 + DIAS.length * (mostrarResponsables ? 5 : 4)}
+                      className={`${celdaEstilo} text-center text-muted-foreground py-3`}
+                    >
+                      No hay actividades fuera de la Matriz esta semana.
                     </td>
-                    <td className={`${celdaEstilo} ${d.cellBg}`}>
-                      <input
-                        type="time"
-                        value={config.proyectoOtro?.[d.key]?.horaFin || ''}
-                        onChange={(e) => actualizarCampoProyectoOtro(d.key, 'horaFin', e.target.value)}
-                        disabled={!puedeEditar}
-                        className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
-                      />
-                    </td>
-                    <td className={`${celdaEstilo} ${d.cellBg} text-center font-medium text-muted-foreground`}>
-                      {formatoDecimalAHoraMin(config.proyectoOtro?.[d.key]?.hProg)}
-                    </td>
-                    <td className={`${celdaEstilo} ${d.cellBg}`}>
-                      <CampoNumero
-                        valor={config.proyectoOtro?.[d.key]?.cantPro || ''}
-                        onChange={(v) => actualizarCampoProyectoOtro(d.key, 'cantPro', v)}
-                        placeholder="—"
-                      disabled={!puedeEditar}
-                      />
-                    </td>
-                    {mostrarResponsables && (
-                      <td className={`${celdaEstilo} ${d.cellBg}`}>
-                        <SelectorResponsable
-                          valor={config.proyectoOtro?.[d.key]?.responsableId || ''}
-                          onChange={(v) => actualizarResponsableDiaProyectoOtro(d.key, v)}
-                          trabajadores={trabajadores}
+                  </tr>
+                )}
+                {config.proyectosOtros.map((proyecto) => (
+                  <tr key={proyecto.id} className="bg-muted/30">
+                    {/* Antes la descripción vivía en una sola celda angosta
+                        (la columna "Actividades"), quedando muy pegada al
+                        borde donde empieza el scroll horizontal de los
+                        días. Ahora ocupa las 3 columnas de identificación
+                        (Proceso + Subproceso + Actividades), con bastante
+                        más espacio para escribir y leer. */}
+                    <td colSpan={3} className={celdaEstilo}>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={proyecto.descripcion}
+                          onChange={(e) => actualizarDescripcionProyectoOtro(proyecto.id, e.target.value)}
+                          placeholder="Describe la actividad fuera de la Matriz..."
                           disabled={!puedeEditar}
+                          className="flex-1 min-w-[220px] text-xs border border-input rounded px-2 py-1.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
                         />
-                      </td>
-                    )}
-                  </React.Fragment>
+                        {puedeEditar && (
+                          <button
+                            type="button"
+                            onClick={() => eliminarFilaProyectoOtro(proyecto.id)}
+                            title="Eliminar esta actividad"
+                            className="text-destructive hover:opacity-70 shrink-0"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    {DIAS.map((d) => (
+                      <React.Fragment key={d.key}>
+                        <td className={`${celdaEstilo} ${d.cellBg}`}>
+                          <input
+                            type="time"
+                            value={proyecto[d.key]?.horaInicio || ''}
+                            onChange={(e) => actualizarCampoProyectoOtro(proyecto.id, d.key, 'horaInicio', e.target.value)}
+                            disabled={!puedeEditar}
+                            className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        <td className={`${celdaEstilo} ${d.cellBg}`}>
+                          <input
+                            type="time"
+                            value={proyecto[d.key]?.horaFin || ''}
+                            onChange={(e) => actualizarCampoProyectoOtro(proyecto.id, d.key, 'horaFin', e.target.value)}
+                            disabled={!puedeEditar}
+                            className="w-full text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        <td className={`${celdaEstilo} ${d.cellBg}`}>
+                          <CampoNumero
+                            valor={proyecto[d.key]?.hProg || ''}
+                            onChange={(v) => actualizarCampoProyectoOtro(proyecto.id, d.key, 'hProg', v)}
+                            placeholder="—"
+                            disabled={!puedeEditar}
+                          />
+                        </td>
+                        <td className={`${celdaEstilo} ${d.cellBg}`}>
+                          <CampoNumero
+                            valor={proyecto[d.key]?.cantPro || ''}
+                            onChange={(v) => actualizarCampoProyectoOtro(proyecto.id, d.key, 'cantPro', v)}
+                            placeholder="—"
+                            disabled={!puedeEditar}
+                          />
+                        </td>
+                        {mostrarResponsables && (
+                          <td className={`${celdaEstilo} ${d.cellBg}`}>
+                            <SelectorResponsable
+                              valor={proyecto[d.key]?.responsableId || ''}
+                              onChange={(v) => actualizarResponsableDiaProyectoOtro(proyecto.id, d.key, v)}
+                              trabajadores={trabajadores}
+                              disabled={!puedeEditar}
+                            />
+                          </td>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
+              </>
             )}
           </tbody>
         </table>

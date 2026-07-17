@@ -9,6 +9,7 @@ import {
   getDiaSemana,
   calcularDuracion,
   calcularLunesDeSemana,
+  todasLasFilas,
   type ConfigCtrlProduccion,
   type RegistroProduccion,
   type Trabajador,
@@ -67,7 +68,7 @@ const GestionProduccion: React.FC = () => {
       setConfig(cfg);
       setRegistros(regs);
       setTrabajadores(trabs);
-      setActividadesTodas(cfg?.actividades || []);
+      setActividadesTodas(todasLasFilas(cfg));
     } catch (error: any) {
       showMessage('error', error.message || 'Error al cargar Gestión de Producción');
     } finally {

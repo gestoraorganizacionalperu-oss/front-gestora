@@ -61,6 +61,9 @@ export interface ActividadProduccion {
 }
 
 export interface ProyectoOtro {
+  // Identificador propio de cada fila (antes no hacía falta porque solo
+  // podía haber una). Se genera en el frontend al crear una fila nueva.
+  id: string;
   descripcion: string;
   lunes: DiaProgramado;
   martes: DiaProgramado;
@@ -77,10 +80,40 @@ export interface ConfigCtrlProduccion {
   // semana tiene su propio documento -- antes había uno solo por empresa.
   semanaInicio?: string;
   actividades: ActividadProduccion[];
-  proyectoOtro: ProyectoOtro;
+  // Antes era un solo objeto (proyectoOtro); ahora es una lista, para
+  // poder tener varias actividades "fuera de la Matriz" por semana.
+  proyectosOtros: ProyectoOtro[];
   createdAt: string;
   updatedAt: string;
   __v?: number;
+}
+
+// Convierte un ProyectoOtro (actividad "fuera de la Matriz") al mismo
+// shape que ActividadProduccion, para poder tratarlas de forma uniforme
+// en reportes, Gestión de Producción, e iniciar/terminar registros --
+// todo ese código ya sabe trabajar con ActividadProduccion, así no hay
+// que duplicar lógica para un segundo tipo parecido.
+export function normalizarProyectoOtro(p: ProyectoOtro): ActividadProduccion {
+  return {
+    actividadId: p.id,
+    actividadNombre: p.descripcion || '(Proyecto/Otro sin descripción)',
+    procesoNombre: 'Proyectos / Otros',
+    subprocesoNombre: '',
+    lunes: p.lunes,
+    martes: p.martes,
+    miercoles: p.miercoles,
+    jueves: p.jueves,
+    viernes: p.viernes,
+    sabado: p.sabado,
+  };
+}
+
+// Actividades de la Matriz + Proyectos/Otros, todas en un solo array con
+// el mismo shape -- lo que casi todo el código de reportes/gestión
+// realmente necesita ("todas las filas programadas de la semana").
+export function todasLasFilas(config: ConfigCtrlProduccion | null | undefined): ActividadProduccion[] {
+  if (!config) return [];
+  return [...config.actividades, ...(config.proyectosOtros || []).map(normalizarProyectoOtro)];
 }
 
 // ---- Registros diarios (forma real confirmada, 04/07/2026) ----
@@ -200,7 +233,7 @@ export function calcularIndicadores(
       if (!dia) continue; // domingo, sin programación
       const configDeEstaSemana = configPorSemana.get(calcularLunesDeSemana(fechaStr));
       if (!configDeEstaSemana) continue;
-      configDeEstaSemana.actividades.forEach((actividad) => {
+      todasLasFilas(configDeEstaSemana).forEach((actividad) => {
         const programado = actividad[dia];
         if (responsableIdFiltro && (programado?.responsableId || '') !== responsableIdFiltro) return;
         if (programado?.cantPro || programado?.hProg) {
@@ -273,7 +306,7 @@ export function construirReporteResumida(
     registrosPorActividad.set(r.actividadId, lista);
   });
 
-  return config.actividades.map((a) => {
+  return todasLasFilas(config).map((a) => {
     const programado = diaHoy ? a[diaHoy] : undefined;
     const registrosActividad = registrosPorActividad.get(a.actividadId) || [];
     const minutosTrabajados = registrosActividad.reduce((s, r) => s + (Number(r.duracionMinutos) || 0), 0);
@@ -336,7 +369,7 @@ export function construirReporteDetallada(
     sesionesPorActividad.set(r.actividadId, lista);
   });
 
-  return config.actividades.map((a) => {
+  return todasLasFilas(config).map((a) => {
     const programado = diaHoy ? a[diaHoy] : undefined;
     const sesiones = (sesionesPorActividad.get(a.actividadId) || [])
       .slice()
@@ -408,7 +441,7 @@ export function construirRendimientoPorResponsable(
     if (!dia) continue;
     const configDeEstaSemana = configPorSemana.get(calcularLunesDeSemana(fechaStr));
     if (!configDeEstaSemana) continue;
-    configDeEstaSemana.actividades.forEach((a) => {
+    todasLasFilas(configDeEstaSemana).forEach((a) => {
       const programado = a[dia];
       if (programado?.cantPro) {
         const respId = programado?.responsableId || '';
