@@ -7,6 +7,9 @@ import {
   produccionService,
   aplanarMatrizProcesos,
   calcularHorasDecimal,
+  sumarHorasADecimal,
+  formatoDecimalAHoraMin,
+  parsearHoras,
   calcularLunesDeSemana,
   sumarSemanas,
   type ConfigCtrlProduccion,
@@ -49,6 +52,46 @@ const CampoNumero: React.FC<{
     className="w-12 text-center text-xs border border-input rounded px-1 py-0.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
   />
 );
+
+// Campo de H.Prog: mientras no lo estás editando, muestra el formato
+// legible ("3h 5min"). Al hacer click para editar, muestra el número
+// crudo para que sea fácil de borrar/escribir. Al salir del campo
+// (blur), interpreta lo que se escribió -- acepta decimal ("1.5"),
+// formato reloj ("1:30"), o el mismo formato "1h 30min" -- y lo
+// convierte de vuelta a decimal para guardarlo.
+const CampoHoras: React.FC<{
+  valor: string;
+  onChange: (valor: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}> = ({ valor, onChange, placeholder = '—', disabled }) => {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState('');
+
+  const mostrado = editando ? texto : valor ? formatoDecimalAHoraMin(valor) : '';
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={mostrado}
+      placeholder={placeholder}
+      disabled={disabled}
+      onFocus={() => {
+        setEditando(true);
+        setTexto(valor || '');
+      }}
+      onChange={(e) => setTexto(e.target.value)}
+      onBlur={() => {
+        setEditando(false);
+        const decimal = parsearHoras(texto);
+        if (decimal !== valor) onChange(decimal);
+      }}
+      title="Escribe como quieras: 1.5, 1h30, 1:30, o 90min -- se convierte solo"
+      className="w-full text-center text-xs border border-input rounded px-1 py-1 bg-background disabled:opacity-60 disabled:cursor-not-allowed"
+    />
+  );
+};
 
 const SelectorResponsable: React.FC<{
   valor: string;
@@ -272,13 +315,16 @@ const AdminControlProduccion: React.FC = () => {
         if (a.actividadId !== actividadId) return a;
         const diaActualizado = { ...a[dia], [campo]: valor };
         // H.Prog se recalcula automáticamente si se editó Hora Inicio u
-        // Hora Fin (para no dejarlo desactualizado). Pero también se puede
-        // escribir directamente a mano (por ejemplo, cuando no hay un
-        // horario fijo pero sí se sabe cuántas horas programadas tiene la
-        // actividad ese día) -- en ese caso, editar hProg no toca Hora
-        // Inicio/Fin.
+        // Hora Fin (para no dejarlo desactualizado). Al revés: si editas
+        // H.Prog directamente y YA hay una Hora Inicio puesta, se
+        // recalcula Hora Fin (Hora Inicio + H.Prog), para que las 3
+        // celdas se mantengan consistentes entre sí sin importar cuál
+        // edites. Si no hay Hora Inicio (por ejemplo, actividades sin
+        // horario fijo), H.Prog se guarda solo, sin tocar Hora Fin.
         if (campo === 'horaInicio' || campo === 'horaFin') {
           diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+        } else if (campo === 'hProg' && diaActualizado.horaInicio) {
+          diaActualizado.horaFin = sumarHorasADecimal(diaActualizado.horaInicio, valor);
         }
         return { ...a, [dia]: diaActualizado };
       })
@@ -327,6 +373,8 @@ const AdminControlProduccion: React.FC = () => {
           const diaActualizado = { ...p[dia], [campo]: valor };
           if (campo === 'horaInicio' || campo === 'horaFin') {
             diaActualizado.hProg = calcularHorasDecimal(diaActualizado.horaInicio, diaActualizado.horaFin);
+          } else if (campo === 'hProg' && diaActualizado.horaInicio) {
+            diaActualizado.horaFin = sumarHorasADecimal(diaActualizado.horaInicio, valor);
           }
           return { ...p, [dia]: diaActualizado };
         }),
@@ -648,10 +696,9 @@ const AdminControlProduccion: React.FC = () => {
                         />
                       </td>
                       <td className={`${celdaEstilo} ${d.cellBg}`}>
-                        <CampoNumero
+                        <CampoHoras
                           valor={act[d.key]?.hProg || ''}
                           onChange={(v) => actualizarCelda(act.actividadId, d.key, 'hProg', v)}
-                          placeholder="—"
                           disabled={!puedeEditar}
                         />
                       </td>
@@ -758,10 +805,9 @@ const AdminControlProduccion: React.FC = () => {
                           />
                         </td>
                         <td className={`${celdaEstilo} ${d.cellBg}`}>
-                          <CampoNumero
+                          <CampoHoras
                             valor={proyecto[d.key]?.hProg || ''}
                             onChange={(v) => actualizarCampoProyectoOtro(proyecto.id, d.key, 'hProg', v)}
-                            placeholder="—"
                             disabled={!puedeEditar}
                           />
                         </td>
