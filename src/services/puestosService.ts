@@ -247,8 +247,10 @@ const realPuestosService = {
     return response.data;
   },
 
-  async getPuestoById(id: string): Promise<Puesto> {
-    const response = await httpClient.get<Puesto>(`/api/puestos/${id}`);
+  async getPuestoById(id: string, incluirInactivo = false): Promise<Puesto> {
+    const response = await httpClient.get<Puesto>(`/api/puestos/${id}`, {
+      params: incluirInactivo ? { incluirInactivo: 'true' } : undefined,
+    });
     return response.data;
   },
 
