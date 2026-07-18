@@ -236,7 +236,7 @@ const ReportesProduccion: React.FC = () => {
     },
     {
       label: 'HORAS HOMBRE POR UNIDAD',
-      value: `${indicadores.horasHombrePorUnidad.toFixed(2)} HH/und`,
+      value: `${indicadores.horasHombrePorUnidad.toFixed(4)} HH/und`,
       formula: 'Σ Horas Trabajadas / Σ Cant. Real',
       icon: Timer,
     },
