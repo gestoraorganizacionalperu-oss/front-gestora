@@ -33,6 +33,25 @@ export function calcularHorasDecimal(horaInicio?: string, horaFin?: string): str
   return (minutos / 60).toFixed(2);
 }
 
+// El inverso de calcularHorasDecimal: dado un horaInicio ("HH:mm") y una
+// cantidad de horas en decimal (ej. "3.5"), calcula la Hora Fin
+// resultante. Se usa cuando la persona edita H.Prog directamente
+// teniendo ya una Hora Inicio puesta -- así Hora Fin se ajusta sola en
+// vez de quedar inconsistente con lo que se escribió a mano.
+// Da la vuelta a las 24h si se pasa de medianoche (ej. 23:00 + 3h = 02:00).
+export function sumarHorasADecimal(horaInicio?: string, horasDecimal?: string): string {
+  if (!horaInicio || !horasDecimal) return '';
+  const [h, m] = horaInicio.split(':').map(Number);
+  const decimal = parseFloat(horasDecimal);
+  if ([h, m].some((n) => Number.isNaN(n)) || Number.isNaN(decimal)) return '';
+  const MINUTOS_EN_DIA = 24 * 60;
+  let totalMin = h * 60 + m + Math.round(decimal * 60);
+  totalMin = ((totalMin % MINUTOS_EN_DIA) + MINUTOS_EN_DIA) % MINUTOS_EN_DIA;
+  const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+  const mm = (totalMin % 60).toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 // Convierte horas en decimal (ej. "4.5") a un texto legible tipo "4h 30min"
 // (ej. "5h", "30min", "4h 30min"), para mostrar en pantalla.
 // Devuelve '—' si no hay valor.
@@ -45,6 +64,51 @@ export function formatoDecimalAHoraMin(decimalStr?: string): string {
   if (h > 0 && m > 0) return `${h}h ${m}min`;
   if (h > 0) return `${h}h`;
   return `${m}min`;
+}
+
+// Inverso de formatoDecimalAHoraMin: convierte lo que la persona escribió a
+// mano de vuelta a horas en decimal (el formato que se guarda). Acepta
+// varias formas de escribirlo, para que no haga falta memorizar una sola:
+//   "1.5"        -> 1.50  (decimal directo)
+//   "1,5"        -> 1.50  (coma decimal, como escriben muchos en Perú)
+//   "1h30"       -> 1.50
+//   "1h 30min"   -> 1.50  (lo que ya se muestra en pantalla)
+//   "1:30"       -> 1.50  (formato reloj)
+//   "90min"      -> 1.50
+//   "2h"         -> 2.00
+// Devuelve '' si no se pudo interpretar nada.
+export function parsearHoras(texto: string): string {
+  const t = texto.trim().toLowerCase().replace(',', '.');
+  if (!t) return '';
+
+  // "H:MM" (formato reloj)
+  const conDosPuntos = t.match(/^(\d+):(\d{1,2})$/);
+  if (conDosPuntos) {
+    const horas = parseInt(conDosPuntos[1], 10);
+    const minutos = parseInt(conDosPuntos[2], 10);
+    return (horas + minutos / 60).toFixed(2);
+  }
+
+  // "Xh" o "Xh Ymin" o "Xh Y" (con "h" siempre presente) -- los minutos
+  // pueden ir con o sin la palabra "min", ej. "1h30" o "1h 30min".
+  const conH = t.match(/^(\d+(?:\.\d+)?)\s*h\s*(?:(\d+(?:\.\d+)?)\s*(?:min|m)?)?$/);
+  if (conH) {
+    const horas = parseFloat(conH[1]);
+    const minutos = conH[2] ? parseFloat(conH[2]) : 0;
+    return (horas + minutos / 60).toFixed(2);
+  }
+
+  // "Ymin" o "Ym" -- minutos solos, "min"/"m" es obligatorio acá para no
+  // confundir con un decimal simple (si no, "3" se interpretaría como 3
+  // minutos en vez de 3 horas).
+  const soloMin = t.match(/^(\d+(?:\.\d+)?)\s*(?:min|m)$/);
+  if (soloMin) {
+    return (parseFloat(soloMin[1]) / 60).toFixed(2);
+  }
+
+  // Decimal simple (ej. "1.5" -> 1 hora 30 min)
+  const decimal = parseFloat(t);
+  return Number.isNaN(decimal) ? '' : decimal.toFixed(2);
 }
 
 export interface ActividadProduccion {
@@ -247,7 +311,7 @@ export function calcularIndicadores(
   const cumplimientoProduccion =
     cantidadProgramadaTotal > 0 ? (totalLogrados / cantidadProgramadaTotal) * 100 : 0;
   const cumplimientoHorasHombre =
-    horasTrabajadasTotal > 0 ? (horasProgramadasTotal / horasTrabajadasTotal) * 100 : 0;
+    horasProgramadasTotal > 0 ? (horasTrabajadasTotal / horasProgramadasTotal) * 100 : 0;
   const productividadReal = horasTrabajadasTotal > 0 ? totalLogrados / horasTrabajadasTotal : 0;
   const productividadProgramada =
     horasProgramadasTotal > 0 ? cantidadProgramadaTotal / horasProgramadasTotal : 0;

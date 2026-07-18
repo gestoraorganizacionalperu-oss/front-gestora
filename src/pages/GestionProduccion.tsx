@@ -10,6 +10,7 @@ import {
   calcularDuracion,
   calcularLunesDeSemana,
   todasLasFilas,
+  formatoDecimalAHoraMin,
   type ConfigCtrlProduccion,
   type RegistroProduccion,
   type Trabajador,
@@ -284,7 +285,7 @@ const GestionProduccion: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="border rounded-lg p-3 text-center">
                       <div className="text-xs text-primary font-medium">H. Programadas</div>
-                      <div className="text-lg font-bold mt-1">{programado?.hProg || '—'}</div>
+                      <div className="text-lg font-bold mt-1">{formatoDecimalAHoraMin(programado?.hProg)}</div>
                     </div>
                     <div className="border rounded-lg p-3 text-center">
                       <div className="text-xs text-primary font-medium">Cant. Programada</div>

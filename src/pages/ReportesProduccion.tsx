@@ -11,6 +11,7 @@ import {
   calcularLunesDeSemana,
   todasLasFilas,
   getDiaSemana,
+  formatoDecimalAHoraMin,
   type IndicadoresProduccion,
   type ConfigCtrlProduccion,
   type FilaResumida,
@@ -216,9 +217,9 @@ const ReportesProduccion: React.FC = () => {
       icon: Target,
     },
     {
-      label: 'CUMPLIMIENTO DE HORAS HOMBRE',
+      label: 'UTILIZACIÓN DE HORAS HOMBRE',
       value: `${indicadores.cumplimientoHorasHombre.toFixed(1)}%`,
-      formula: 'Σ Horas Programadas / Σ Horas Trabajadas × 100',
+      formula: 'Σ Horas Trabajadas / Σ Horas Programadas × 100',
       icon: Clock,
     },
     {
@@ -419,11 +420,9 @@ const ReportesProduccion: React.FC = () => {
                     </td>
                   )}
                   <td className={`${celdaEstilo} font-medium`}>{f.actividadNombre}</td>
-                  <td className={`${celdaEstilo} text-center`}>{f.hProg ? `${f.hProg}h` : '—'}</td>
+                  <td className={`${celdaEstilo} text-center`}>{formatoDecimalAHoraMin(f.hProg)}</td>
                   <td className={`${celdaEstilo} text-center`}>
-                    {f.minutosTrabajados > 0
-                      ? `${Math.floor(f.minutosTrabajados / 60)}:${Math.round(f.minutosTrabajados % 60).toString().padStart(2, '0')}`
-                      : '—'}
+                    {f.minutosTrabajados > 0 ? formatoDecimalAHoraMin((f.minutosTrabajados / 60).toString()) : '—'}
                   </td>
                   <td className={`${celdaEstilo} text-center`}>{f.cantPro || '—'}</td>
                   <td className={`${celdaEstilo} text-center`}>{f.cantReal > 0 ? f.cantReal : '—'}</td>
